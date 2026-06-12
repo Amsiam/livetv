@@ -157,11 +157,15 @@ CSRF_TRUSTED_ORIGINS = [
     if origin.strip()
 ]
 
-# cloudflared forwards HTTPS; runserver sees HTTP without this
+PUBLIC_API_URL = os.environ.get("PUBLIC_API_URL", "").rstrip("/")
+
+# Admin CSRF behind Cloudflare / tunnel — trust public HTTPS origin from env
+if PUBLIC_API_URL.startswith("https://") and PUBLIC_API_URL not in CSRF_TRUSTED_ORIGINS:
+    CSRF_TRUSTED_ORIGINS.append(PUBLIC_API_URL)
+
+# cloudflared / nginx forward HTTPS; origin must see request.is_secure() == True
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 USE_X_FORWARDED_HOST = True
-
-PUBLIC_API_URL = os.environ.get("PUBLIC_API_URL", "").rstrip("/")
 MATCH_LIST_CACHE_TTL = int(os.environ.get("MATCH_LIST_CACHE_TTL", "60"))
 APP_UPDATE_CACHE_TTL = int(os.environ.get("APP_UPDATE_CACHE_TTL", "300"))
 CHANNEL_FAILURE_THRESHOLD = int(os.environ.get("CHANNEL_FAILURE_THRESHOLD", "100"))
