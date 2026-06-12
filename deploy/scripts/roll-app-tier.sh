@@ -40,11 +40,22 @@ for svc in "${APP_SERVICES[@]}"; do
   done < <("${COMPOSE[@]}" -f "$COMPOSE_FILE" ps -aq "$svc" 2>/dev/null || true)
 done
 
-echo "==> Build app images"
-"${COMPOSE[@]}" -f "$COMPOSE_FILE" build "${APP_SERVICES[@]}"
+echo "==> Git commit on disk"
+git -C "$(cd "$DEPLOY_DIR/.." && pwd)" log -1 --oneline
+
+echo "==> Build app images (Python code is copied into the image — pull alone is not enough)"
+if [[ "${FORCE_BUILD:-}" == "1" ]]; then
+  "${COMPOSE[@]}" -f "$COMPOSE_FILE" build --no-cache "${APP_SERVICES[@]}"
+else
+  "${COMPOSE[@]}" -f "$COMPOSE_FILE" build "${APP_SERVICES[@]}"
+fi
 
 echo "==> Start data stores (no recreate)"
 "${COMPOSE[@]}" -f "$COMPOSE_FILE" up -d --no-recreate postgres redis
 
-echo "==> Start app containers"
-"${COMPOSE[@]}" -f "$COMPOSE_FILE" up -d "${APP_SERVICES[@]}"
+echo "==> Start app containers (force new containers from fresh images)"
+"${COMPOSE[@]}" -f "$COMPOSE_FILE" up -d --force-recreate "${APP_SERVICES[@]}"
+
+echo "==> Running web image"
+docker inspect livetv_web --format 'image={{.Image}} started={{.State.StartedAt}}' 2>/dev/null \
+  || sudo docker inspect livetv_web --format 'image={{.Image}} started={{.State.StartedAt}}'

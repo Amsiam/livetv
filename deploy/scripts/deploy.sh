@@ -20,6 +20,9 @@ git -C "$ROOT" pull --ff-only
 echo "==> Roll application containers"
 "$SCRIPT_DIR/roll-app-tier.sh"
 
+echo "==> Verify web container picked up latest code"
+"$SCRIPT_DIR/verify-app-code.sh"
+
 echo "==> Run migrations"
 "${COMPOSE[@]}" -f "$COMPOSE_FILE" exec -T web uv run python manage.py migrate --noinput
 
