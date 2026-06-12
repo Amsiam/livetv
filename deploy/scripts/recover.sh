@@ -1,32 +1,19 @@
 #!/usr/bin/env bash
-# Remove orphan containers from a failed compose recreate; restart app tier.
+# Recover from a failed compose recreate (orphans, exited web, nginx restart loop).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DEPLOY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
-COMPOSE=("$SCRIPT_DIR/compose.sh")
 
-cd "$DEPLOY_DIR"
+echo "==> Restart Docker if containers cannot be removed"
+if ! docker info >/dev/null 2>&1; then
+  sudo systemctl restart docker
+  sleep 3
+fi
 
-echo "==> Remove failed recreate orphans (hash-prefixed names, Created/Exited)"
-while IFS= read -r line; do
-  name="${line%% *}"
-  status="${line#* }"
-  case "$name" in
-    *_deploy_* | *-deploy-*)
-      echo "  rm $name ($status)"
-      docker rm -f "$name" 2>/dev/null || sudo docker rm -f "$name"
-      ;;
-  esac
-done < <(docker ps -a --format '{{.Names}} {{.Status}}' | grep -E 'deploy' || true)
+"$SCRIPT_DIR/roll-app-tier.sh"
 
-echo "==> Keep postgres/redis running; rebuild app tier"
-"${COMPOSE[@]}" -f "$COMPOSE_FILE" up -d --no-recreate postgres redis
-"${COMPOSE[@]}" -f "$COMPOSE_FILE" up -d --build web nginx celery-worker celery-beat
-
+echo ""
 echo "==> Status"
-"${COMPOSE[@]}" -f "$COMPOSE_FILE" ps
-
+"$SCRIPT_DIR/compose.sh" -f docker-compose.prod.yml ps
 echo ""
 echo "Run ./scripts/health-check.sh when all services show Up."

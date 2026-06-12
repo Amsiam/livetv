@@ -519,8 +519,7 @@ Or manually:
 
 ```bash
 git pull
-./scripts/compose.sh -f docker-compose.prod.yml up -d --no-recreate postgres redis
-./scripts/compose.sh -f docker-compose.prod.yml up -d --build web nginx celery-worker celery-beat
+./scripts/roll-app-tier.sh
 ./scripts/manage.sh migrate --noinput
 ```
 
@@ -668,7 +667,7 @@ Run after every deploy:
 | `unknown shorthand flag: 'f' in -f` | Install Compose v2: `./scripts/install-compose-v2.sh` |
 | `Unable to locate package docker-compose-plugin` | Docker CE apt repo not configured — use `./scripts/install-compose-v2.sh` |
 | `KeyError: 'ContainerConfig'` on recreate | Remove apt `docker-compose` v1; run `install-compose-v2.sh`; `docker rm -f deploy_web_1` then `./scripts/deploy.sh` |
-| `cannot stop container` / `permission denied` | `sudo systemctl restart docker`; remove stuck container: `sudo docker rm -f deploy_web_1`; redeploy app only (below); do **not** recreate postgres/redis unless necessary |
+| `cannot stop container` / `permission denied` | `sudo systemctl restart docker`, then `cd deploy && ./scripts/recover.sh` (force-removes app containers before recreate; never touches postgres/redis volumes) |
 | nginx `read-only file system` / mount error | Pull latest (nginx config is in the image, not bind-mounted); run `./scripts/deploy.sh` again |
 | 502 Bad Gateway | `./scripts/compose.sh -f docker-compose.prod.yml logs web` — check migrations, env vars |
 | 400 on `localhost:8134` / DisallowedHost | Add `localhost,127.0.0.1` to `DJANGO_ALLOWED_HOSTS`, or use `./scripts/health-check.sh` (sends public `Host` from `PUBLIC_API_URL`); restart web after `.env` change |

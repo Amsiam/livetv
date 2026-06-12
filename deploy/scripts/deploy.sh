@@ -17,11 +17,8 @@ fi
 echo "==> Pull latest code"
 git -C "$ROOT" pull --ff-only
 
-echo "==> Ensure data stores (no recreate on routine deploy)"
-"${COMPOSE[@]}" -f "$COMPOSE_FILE" up -d --no-recreate postgres redis
-
-echo "==> Build and start application containers"
-"${COMPOSE[@]}" -f "$COMPOSE_FILE" up -d --build web nginx celery-worker celery-beat
+echo "==> Roll application containers"
+"$SCRIPT_DIR/roll-app-tier.sh"
 
 echo "==> Run migrations"
 "${COMPOSE[@]}" -f "$COMPOSE_FILE" exec -T web uv run python manage.py migrate --noinput
