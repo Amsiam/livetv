@@ -88,8 +88,8 @@ services:
   nginx:
     container_name: livetv_nginx
     build:
-      context: ./nginx
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: deploy/nginx/Dockerfile
     restart: unless-stopped
     ports:
       - "${NGINX_PUBLISH_PORT:-8134}:8134"

@@ -1,15 +1,15 @@
 # Deployment Guide — Live TV
 
-Deploy the **Django API** on **Hostinger KVM4** with **Docker Compose**, **Cloudflare CDN**, **PostgreSQL**, **Redis**, and **Telegram** alerts. Distribute the **Flutter Android app** as a sideload APK with the production API URL baked in at build time.
+Deploy the **Django API** and **React web app** on **Hostinger KVM4** with **Docker Compose**, **Cloudflare CDN**, **PostgreSQL**, **Redis**, and **Telegram** alerts. Distribute the **Flutter Android app** as a sideload APK with the production API URL baked in at build time.
 
 ## Architecture (production)
 
 ```
-Flutter app
+Flutter Android app / Browser (React + Video.js at /)
     ↓
 Cloudflare CDN + WAF  (tv.test71.xyz)
     ↓
-Nginx :8134 on KVM4 (origin; Cloudflare Tunnel or DNS)
+Nginx :8134 on KVM4 (SPA static + proxy /v1, /admin)
     ↓
 Gunicorn (Django + DRF + Admin)
     ↓
@@ -80,6 +80,7 @@ Project layout on server:
 ```
 /opt/live-tv/
   app/              # Flutter Android app
+  web/              # React + Video.js browser client (built into nginx image)
   backend/          # Django app
   deploy/           # Docker, nginx, production scripts
   scripts/          # flutter-build-apk.sh, cloudflared-dev-api.sh, etc.
@@ -251,6 +252,14 @@ Most users share the same `build` query param, so the edge serves one cached res
 - Then: Cache eligibility = Eligible, Edge TTL = 1 month (or Respect origin `Cache-Control`)
 
 Each APK filename includes the version (`livetv-android-v1.0.4-b5.apk`), so edge cache is safe for a long TTL. After the first request per Cloudflare PoP, thousands of in-app downloads are served from Cloudflare — not your VPS. Requires the orange-cloud proxied production domain; **trycloudflare quick tunnels are not a CDN**.
+
+**Rule 7 — Cache web app assets**
+
+- When: URI Path starts with `/assets`
+- And: Request Method equals `GET`
+- Then: Cache eligibility = Eligible, Edge TTL = 1 month (or Respect origin `Cache-Control: immutable`)
+
+Vite emits hashed filenames under `/assets/`; the browser shell (`/` and `index.html`) uses a short TTL from nginx.
 
 ### WAF rate limiting
 
