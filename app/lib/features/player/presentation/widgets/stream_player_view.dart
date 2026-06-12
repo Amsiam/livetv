@@ -177,7 +177,15 @@ class _StreamPlayerViewState extends ConsumerState<StreamPlayerView> {
         lower.contains('force-seekable') ||
         lower.contains('ffurl') ||
         lower.contains('tcp') ||
+        _isInterruptedPlayError(error) ||
         RegExp(r'0x[0-9a-f]+').hasMatch(lower);
+  }
+
+  bool _isInterruptedPlayError(String error) {
+    final lower = error.toLowerCase();
+    return lower.contains('removed from the document') ||
+        lower.contains('play() request was interrupted') ||
+        lower.contains('aborterror');
   }
 
   void _markPlaybackStarted() {
@@ -194,7 +202,12 @@ class _StreamPlayerViewState extends ConsumerState<StreamPlayerView> {
   }
 
   void _onPlayerError(String error) {
-    if (!mounted || _isNonFatalStreamError(error)) return;
+    if (!mounted) return;
+    if (_isInterruptedPlayError(error) && !_playbackConfirmed) {
+      unawaited(_retryInterruptedPlay());
+      return;
+    }
+    if (_isNonFatalStreamError(error)) return;
     if (_playbackConfirmed) return;
 
     _errorDebounce?.cancel();
@@ -202,6 +215,17 @@ class _StreamPlayerViewState extends ConsumerState<StreamPlayerView> {
       if (!mounted || _playbackConfirmed) return;
       unawaited(_failPlayback(error));
     });
+  }
+
+  Future<void> _retryInterruptedPlay() async {
+    if (!mounted || _playbackConfirmed || _failureReported) return;
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    if (!mounted || _playbackConfirmed || _failureReported) return;
+    try {
+      if (!_player.state.playing) {
+        await _player.play();
+      }
+    } catch (_) {}
   }
 
   Future<void> _failPlayback(String message) async {
@@ -292,12 +316,29 @@ class _StreamPlayerViewState extends ConsumerState<StreamPlayerView> {
 
   Future<void> _startPlayer(String url, int generation) async {
     try {
+      await _player.stop();
+      if (!mounted || generation != _loadGeneration) return;
       await _player.open(Media(url), play: true);
       if (!mounted || generation != _loadGeneration) return;
       await _applyPlaybackSettings(_player.state.tracks.video);
     } catch (error) {
       if (!mounted || generation != _loadGeneration) return;
-      _failPlayback(error.toString());
+      final message = error.toString();
+      if (_isInterruptedPlayError(message)) {
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        if (!mounted || generation != _loadGeneration) return;
+        try {
+          await _player.open(Media(url), play: true);
+          if (!mounted || generation != _loadGeneration) return;
+          await _applyPlaybackSettings(_player.state.tracks.video);
+          return;
+        } catch (retryError) {
+          if (!mounted || generation != _loadGeneration) return;
+          _failPlayback(retryError.toString());
+          return;
+        }
+      }
+      _failPlayback(message);
     }
   }
 
@@ -348,16 +389,16 @@ class _StreamPlayerViewState extends ConsumerState<StreamPlayerView> {
           children: [
             ColoredBox(
               color: Colors.black,
-              child: pipMode
-                  ? video
-                  : MaterialVideoControlsTheme(
-                      normal: liveTvPlayerControlsNormal,
-                      fullscreen: liveTvPlayerControlsFullscreen(
-                        manualBrightnessGesture:
-                            brightnessMode == PlayerBrightnessMode.manual,
-                      ),
-                      child: video,
-                    ),
+              child: MaterialVideoControlsTheme(
+                normal: pipMode
+                    ? liveTvPlayerControlsPip
+                    : liveTvPlayerControlsNormal,
+                fullscreen: liveTvPlayerControlsFullscreen(
+                  manualBrightnessGesture:
+                      brightnessMode == PlayerBrightnessMode.manual,
+                ),
+                child: video,
+              ),
             ),
             if (_showLoadingOverlay)
               const Positioned.fill(

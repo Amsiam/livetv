@@ -43,6 +43,20 @@ const _fullscreenTopControls = [
   LiveTvPlayerSettingsButton(),
 ];
 
+const liveTvPlayerControlsPip = MaterialVideoControlsThemeData(
+  automaticallyImplySkipNextButton: false,
+  automaticallyImplySkipPreviousButton: false,
+  displaySeekBar: false,
+  volumeGesture: false,
+  brightnessGesture: false,
+  seekGesture: false,
+  gesturesEnabledWhileControlsVisible: false,
+  seekOnDoubleTap: false,
+  topButtonBar: [],
+  primaryButtonBar: [],
+  bottomButtonBar: [],
+);
+
 const liveTvPlayerControlsNormal = MaterialVideoControlsThemeData(
   automaticallyImplySkipNextButton: false,
   automaticallyImplySkipPreviousButton: false,

@@ -252,7 +252,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
           final activeSource = channel.sourceAt(_activeSourceIndex);
 
           final player = StreamPlayerView(
-            key: ValueKey('${channel.id}:${activeSource.id}'),
+            key: ValueKey(channel.id),
             streamUrl: activeSource.streamUrl,
             title: channel.name,
             onPlaybackFailed: _onPlaybackFailed,

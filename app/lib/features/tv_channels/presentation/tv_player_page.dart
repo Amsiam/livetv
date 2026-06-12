@@ -263,12 +263,13 @@ class _TvPlayerPageState extends ConsumerState<TvPlayerPage> {
           final relatedState = _relatedListArgs != null
               ? ref.watch(tvChannelListProvider(_relatedListArgs!))
               : null;
-          if (relatedState != null) {
-            _syncOpenedChannel(channel, relatedState.items);
-          } else if (_selectedChannel == null) {
+          if (_selectedChannel == null) {
             _selectedChannel = channel;
             _activeSourceIndex = _sourceIndexFor(channel, widget.channelId);
             _syncedChannelId = channel.id;
+          }
+          if (relatedState != null) {
+            _syncOpenedChannel(channel, relatedState.items);
           }
 
           final selected = _selectedChannel ?? channel;
@@ -276,7 +277,7 @@ class _TvPlayerPageState extends ConsumerState<TvPlayerPage> {
           final activeSource = selected.sourceAt(_activeSourceIndex);
 
           final player = StreamPlayerView(
-            key: ValueKey('${selected.id}:${activeSource.id}'),
+            key: ValueKey(selected.id),
             streamUrl: activeSource.streamUrl,
             title: selected.name,
             onPlaybackFailed: _onPlaybackFailed,
