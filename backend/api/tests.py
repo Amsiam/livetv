@@ -413,6 +413,16 @@ class TvChannelFailureTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["failure_count"], 1)
 
+    def test_report_tv_channel_failure_without_csrf_while_logged_in(self):
+        """Regression: admin session cookie on same domain must not 403 public API POSTs."""
+        from django.contrib.auth import get_user_model
+
+        user = get_user_model().objects.create_user("api-tester", password="test-pass-123")
+        self.client.force_login(user)
+        url = f"/v1/tv-channels/{self.tv_channel.id}/report-failure/"
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 200)
+
     def test_report_tv_channel_failure_deactivates(self):
         url = f"/v1/tv-channels/{self.tv_channel.id}/report-failure/"
         for i in range(3):
