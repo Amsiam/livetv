@@ -76,3 +76,33 @@ class PublishAppReleaseTests(TestCase):
                     "https://api.example.com/media/releases/livetv-android-v1.0.6-b7.apk",
                 )
                 self.assertNotIn("app-arm64-v8a-release", release.download_url)
+
+    @override_settings(PUBLIC_API_URL="https://api.example.com")
+    def test_reupload_keeps_canonical_filename_and_url(self):
+        from django.core.files.storage import default_storage
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        apk_bytes = b"PK fake apk v1"
+        canonical = "releases/livetv-android-v1.0.6-b7.apk"
+        with tempfile.TemporaryDirectory() as media_root:
+            with self.settings(MEDIA_ROOT=media_root):
+                default_storage.save(canonical, SimpleUploadedFile("old.apk", apk_bytes))
+
+                release = AppRelease(
+                    platform="android",
+                    version_name="1.0.6",
+                    build_number=7,
+                )
+                release.apk_file = SimpleUploadedFile(
+                    "app-arm64-v8a-release.apk",
+                    b"PK fake apk v2",
+                    content_type="application/vnd.android.package-archive",
+                )
+                release.save()
+
+                self.assertEqual(release.apk_file.name, canonical)
+                self.assertEqual(
+                    release.download_url,
+                    "https://api.example.com/media/releases/livetv-android-v1.0.6-b7.apk",
+                )
+                self.assertNotIn("_", release.apk_file.name.split("/")[-1])

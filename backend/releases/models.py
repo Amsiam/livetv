@@ -69,12 +69,47 @@ class AppRelease(models.Model):
         return ""
 
     def save(self, *args, **kwargs):
+        new_apk = bool(
+            self.apk_file and not getattr(self.apk_file, "_committed", True)
+        )
+
+        if new_apk:
+            from django.core.files.storage import default_storage
+
+            from releases.apk_files import release_apk_upload_to
+
+            canonical_path = release_apk_upload_to(self, "")
+            if default_storage.exists(canonical_path):
+                default_storage.delete(canonical_path)
+
+            if self.pk:
+                previous = (
+                    type(self)
+                    .objects.filter(pk=self.pk)
+                    .values_list("apk_file", flat=True)
+                    .first()
+                )
+                if (
+                    previous
+                    and previous != canonical_path
+                    and default_storage.exists(previous)
+                ):
+                    default_storage.delete(previous)
+
         super().save(*args, **kwargs)
 
-        if self.apk_file:
+        if self.apk_file and self.pk:
             from releases.media_urls import public_media_url
 
-            download_url = public_media_url(self.apk_file.name)
+            stored_name = (
+                type(self)
+                .objects.filter(pk=self.pk)
+                .values_list("apk_file", flat=True)
+                .first()
+            ) or self.apk_file.name
+            self.apk_file.name = stored_name
+
+            download_url = public_media_url(stored_name)
             if self.download_url != download_url:
                 type(self).objects.filter(pk=self.pk).update(download_url=download_url)
                 self.download_url = download_url
