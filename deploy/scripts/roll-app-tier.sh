@@ -22,9 +22,16 @@ while IFS= read -r name; do
   [[ -z "$name" ]] && continue
   echo "  rm $name"
   docker rm -f "$name" 2>/dev/null || sudo docker rm -f "$name" 2>/dev/null || true
-done < <(docker ps -a --format '{{.Names}}' | grep -E '_deploy_|-deploy-' || true)
+done < <(docker ps -a --format '{{.Names}}' | grep -E '_deploy_|-deploy-|^deploy-' || true)
 
-echo "==> Force-remove app containers (skip compose stop — permission denied on some hosts)"
+echo "==> Force-remove app containers by name"
+for name in livetv_web livetv_nginx livetv_celery_worker livetv_celery_beat \
+  deploy_web_1 deploy_nginx_1 deploy_celery-worker_1 deploy_celery-beat_1 \
+  deploy-celery-worker-1 deploy-celery-beat-1; do
+  docker rm -f "$name" 2>/dev/null || sudo docker rm -f "$name" 2>/dev/null || true
+done
+
+echo "==> Force-remove app containers by compose label (skip graceful stop)"
 for svc in "${APP_SERVICES[@]}"; do
   while IFS= read -r id; do
     [[ -z "$id" ]] && continue

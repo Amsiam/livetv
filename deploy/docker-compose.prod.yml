@@ -1,3 +1,5 @@
+name: livetv
+
 x-backend-common: &backend-common
   build:
     context: ../backend
@@ -19,6 +21,7 @@ x-backend-common: &backend-common
 
 services:
   postgres:
+    container_name: livetv_postgres
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
@@ -34,6 +37,7 @@ services:
       retries: 5
 
   redis:
+    container_name: livetv_redis
     image: redis:7-alpine
     restart: unless-stopped
     command: redis-server --appendonly yes
@@ -46,6 +50,7 @@ services:
       retries: 5
 
   web:
+    container_name: livetv_web
     <<: *backend-common
     environment:
       <<: *backend-env
@@ -55,6 +60,7 @@ services:
       - media_data:/app/media
 
   celery-worker:
+    container_name: livetv_celery_worker
     <<: *backend-common
     entrypoint: ["uv", "run", "celery"]
     command: ["-A", "config", "worker", "-l", "info", "--concurrency=2"]
@@ -67,6 +73,7 @@ services:
         condition: service_started
 
   celery-beat:
+    container_name: livetv_celery_beat
     <<: *backend-common
     entrypoint: ["uv", "run", "celery"]
     command: ["-A", "config", "beat", "-l", "info"]
@@ -79,6 +86,7 @@ services:
         condition: service_started
 
   nginx:
+    container_name: livetv_nginx
     build:
       context: ./nginx
       dockerfile: Dockerfile

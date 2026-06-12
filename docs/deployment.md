@@ -523,15 +523,30 @@ git pull
 ./scripts/manage.sh migrate --noinput
 ```
 
-**Stuck deploy** (permission denied, orphan `b84dcd749db4_deploy_web_1`, nginx restart loop):
+**Stuck deploy** (`permission denied` stopping celery, mixed `deploy-*` / `deploy_*` container names):
 
 ```bash
-sudo systemctl restart docker   # if stop/rm fails
-cd /opt/live-tv/deploy
-./scripts/recover.sh
+sudo reboot
 ```
 
-Or manually remove the orphan rows from `docker compose ps -a` (names like `*_deploy_*`), then bring app tier up — leave healthy `deploy_postgres_1` / `deploy_redis_1` alone.
+After the VPS is back:
+
+```bash
+cd /opt/live-tv/deploy
+git pull
+docker ps -a    # list everything
+
+# Remove ALL containers (database/redis data stays in Docker volumes)
+sudo docker rm -f $(sudo docker ps -aq)
+
+# Fresh start — stable names: livetv_web, livetv_postgres, livetv_nginx, …
+docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml ps
+```
+
+Do **not** run bare `docker compose up -d` on a half-broken stack — it tries to stop old celery containers and fails. After a clean `rm` + reboot, one full `up -d --build` is fine.
+
+**Day-to-day:** restart one service only — `docker compose -f docker-compose.prod.yml restart web` (not full `up -d`).
 
 ---
 
@@ -671,6 +686,7 @@ Run after every deploy:
 | nginx `read-only file system` / mount error | Pull latest (nginx config is in the image, not bind-mounted); run `./scripts/deploy.sh` again |
 | 502 Bad Gateway | `./scripts/compose.sh -f docker-compose.prod.yml logs web` — check migrations, env vars |
 | 400 on `localhost:8134` / DisallowedHost | Add `localhost,127.0.0.1` to `DJANGO_ALLOWED_HOSTS`, or use `./scripts/health-check.sh` (sends public `Host` from `PUBLIC_API_URL`); restart web after `.env` change |
+| Admin **403 CSRF verification failed** | In `deploy/.env`: `PUBLIC_API_URL=https://tv.test71.xyz` and `CSRF_TRUSTED_ORIGINS=https://tv.test71.xyz`; rebuild `web` + `nginx` (nginx must forward `X-Forwarded-Proto: https`) |
 | API empty after admin edit | Wait 60s for cache TTL, or flush Redis: `./scripts/compose.sh -f docker-compose.prod.yml exec redis redis-cli FLUSHDB` |
 | Cloudflare not caching | Check Cache Rules; ensure `Cache-Control` headers present (`curl -I`) |
 | Telegram not sending | Verify token/chat ID; run `./scripts/manage.sh test_telegram`; check `./scripts/compose.sh -f docker-compose.prod.yml logs web` |
