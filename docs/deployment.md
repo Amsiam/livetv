@@ -42,8 +42,9 @@ SSH into the VPS as root, then:
 apt update && apt upgrade -y
 apt install -y git curl ufw
 
-# Docker
+# Docker + Compose plugin (required for deploy scripts)
 curl -fsSL https://get.docker.com | sh
+apt install -y docker-compose-plugin
 usermod -aG docker $USER
 
 # Firewall
@@ -149,6 +150,8 @@ cd /opt/live-tv/deploy
 chmod +x scripts/*.sh
 ./scripts/deploy.sh
 ```
+
+Deploy scripts call `scripts/compose.sh`, which uses `docker compose` (plugin) or falls back to `docker-compose`. If you see `unknown shorthand flag: 'f' in -f`, the Compose plugin is missing — run `apt install -y docker-compose-plugin` and log out/in, or install `docker-compose` and retry.
 
 Create admin user:
 
@@ -643,7 +646,8 @@ Run after every deploy:
 
 | Problem | Fix |
 |---------|-----|
-| 502 Bad Gateway | `docker compose logs web` — check migrations, env vars |
+| `unknown shorthand flag: 'f' in -f` on deploy | Install Compose: `apt install -y docker-compose-plugin` (or `docker-compose`); scripts use `deploy/scripts/compose.sh` |
+| 502 Bad Gateway | `./scripts/compose.sh -f docker-compose.prod.yml logs web` — check migrations, env vars |
 | 400 DisallowedHost | Add domain to `DJANGO_ALLOWED_HOSTS`, restart web |
 | API empty after admin edit | Wait 60s for cache TTL, or flush Redis: `docker compose exec redis redis-cli FLUSHDB` |
 | Cloudflare not caching | Check Cache Rules; ensure `Cache-Control` headers present (`curl -I`) |
