@@ -1,0 +1,16 @@
+# Cloudflare Tunnel — production (named tunnel)
+# Docs: deploy/cloudflared/README.md
+#
+# 1. cloudflared tunnel login
+# 2. cloudflared tunnel create livetv-api
+# 3. cp credentials JSON to /etc/cloudflared/<tunnel-id>.json
+# 4. cloudflared tunnel route dns livetv-api api.yourdomain.com
+# 5. cp this file to /etc/cloudflared/config.yml and edit tunnel + hostname
+
+tunnel: REPLACE_WITH_TUNNEL_UUID
+credentials-file: /etc/cloudflared/REPLACE_WITH_TUNNEL_UUID.json
+
+ingress:
+  - hostname: api.yourdomain.com
+    service: http://127.0.0.1:80
+  - service: http_status:404

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "260601859262",
+    "project_id": "live-tv-810ba",
+    "storage_bucket": "live-tv-810ba.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:260601859262:android:3617760b0fb84186ace2ef",
+        "android_client_info": {
+          "package_name": "com.livetv.livetv_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAz_WkRHAGFuBrXoYq6du7oA5Gbb2klDBo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

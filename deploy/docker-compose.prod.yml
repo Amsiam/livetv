@@ -1,0 +1,94 @@
+x-backend-common: &backend-common
+  build:
+    context: ../backend
+    dockerfile: ../deploy/Dockerfile
+  restart: unless-stopped
+  env_file:
+    - .env
+  environment: &backend-env
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: 5432
+    REDIS_URL: redis://redis:6379/1
+    CELERY_BROKER_URL: redis://redis:6379/0
+    CELERY_RESULT_BACKEND: redis://redis:6379/0
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  web:
+    <<: *backend-common
+    volumes:
+      - static_data:/app/staticfiles
+      - media_data:/app/media
+
+  celery-worker:
+    <<: *backend-common
+    entrypoint: ["uv", "run", "celery"]
+    command: ["-A", "config", "worker", "-l", "info", "--concurrency=2"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      web:
+        condition: service_started
+
+  celery-beat:
+    <<: *backend-common
+    entrypoint: ["uv", "run", "celery"]
+    command: ["-A", "config", "beat", "-l", "info"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      web:
+        condition: service_started
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/livetv.conf:/etc/nginx/conf.d/default.conf:ro
+      - static_data:/app/staticfiles:ro
+      - media_data:/app/media:ro
+    depends_on:
+      - web
+
+volumes:
+  postgres_data:
+  redis_data:
+  static_data:
+  media_data:
