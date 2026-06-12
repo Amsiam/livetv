@@ -59,14 +59,34 @@ class AppRelease(models.Model):
         return f"{self.platform} {self.version_name} ({self.build_number})"
 
     def resolved_download_url(self) -> str:
-        """URL served to the app — always the value stored at publish time."""
-        if self.download_url:
-            return self.download_url
+        """URL served to the app — derived from the stored APK when present."""
         if self.apk_file:
             from releases.media_urls import public_media_url
 
             return public_media_url(self.apk_file.name)
+        if self.download_url:
+            return self.download_url
         return ""
+
+    def sync_download_url(self) -> None:
+        if not self.pk or not self.apk_file:
+            return
+
+        from releases.media_urls import public_media_url
+
+        stored_name = (
+            type(self)
+            .objects.filter(pk=self.pk)
+            .values_list("apk_file", flat=True)
+            .first()
+        ) or self.apk_file.name
+        if not stored_name:
+            return
+
+        self.apk_file.name = stored_name
+        download_url = public_media_url(stored_name)
+        type(self).objects.filter(pk=self.pk).update(download_url=download_url)
+        self.download_url = download_url
 
     def save(self, *args, **kwargs):
         new_apk = bool(
@@ -74,45 +94,12 @@ class AppRelease(models.Model):
         )
 
         if new_apk:
-            from django.core.files.storage import default_storage
+            from releases.apk_files import clear_stale_apk_files
 
-            from releases.apk_files import release_apk_upload_to
-
-            canonical_path = release_apk_upload_to(self, "")
-            if default_storage.exists(canonical_path):
-                default_storage.delete(canonical_path)
-
-            if self.pk:
-                previous = (
-                    type(self)
-                    .objects.filter(pk=self.pk)
-                    .values_list("apk_file", flat=True)
-                    .first()
-                )
-                if (
-                    previous
-                    and previous != canonical_path
-                    and default_storage.exists(previous)
-                ):
-                    default_storage.delete(previous)
+            clear_stale_apk_files(self)
 
         super().save(*args, **kwargs)
-
-        if self.apk_file and self.pk:
-            from releases.media_urls import public_media_url
-
-            stored_name = (
-                type(self)
-                .objects.filter(pk=self.pk)
-                .values_list("apk_file", flat=True)
-                .first()
-            ) or self.apk_file.name
-            self.apk_file.name = stored_name
-
-            download_url = public_media_url(stored_name)
-            if self.download_url != download_url:
-                type(self).objects.filter(pk=self.pk).update(download_url=download_url)
-                self.download_url = download_url
+        self.sync_download_url()
 
         from releases.cache import invalidate_latest_release_cache
 

@@ -48,7 +48,7 @@ class AppUpdateTests(TestCase):
         self.assertIn("livetv-1.0.1.apk", data["download_url"])
 
     @override_settings(PUBLIC_API_URL="", DEBUG=True)
-    def test_api_returns_stored_download_url(self):
+    def test_api_returns_stored_download_url_without_apk(self):
         release = AppRelease.objects.get(build_number=5)
         release.download_url = "https://tunnel.example.com/media/releases/foo.apk"
         release.save(update_fields=["download_url", "updated_at"])

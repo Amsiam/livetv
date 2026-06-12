@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from django.core.files import File
 from django.core.files.storage import default_storage
 
 if TYPE_CHECKING:
@@ -19,19 +18,21 @@ def release_apk_upload_to(instance: AppRelease, filename: str) -> str:
     return f"releases/{canonical_apk_basename(instance.platform, instance.version_name, instance.build_number)}"
 
 
-def store_canonical_apk(release: AppRelease) -> None:
-    """Rename legacy uploads to the canonical releases/ path (no model save)."""
-    if not release.apk_file:
+def clear_stale_apk_files(release: AppRelease) -> None:
+    """Remove prior APK files for this platform/build (including mangled names)."""
+    from pathlib import Path
+
+    from django.conf import settings
+
+    releases_dir = Path(settings.MEDIA_ROOT) / "releases"
+    if not releases_dir.is_dir():
         return
 
-    storage_name = release_apk_upload_to(release, "")
-    if release.apk_file.name == storage_name:
-        return
+    prefix = f"livetv-{release.platform}-v"
+    build_token = f"-b{release.build_number}"
+    for path in releases_dir.glob("*.apk"):
+        if path.name.startswith(prefix) and build_token in path.name:
+            storage_name = f"releases/{path.name}"
+            if default_storage.exists(storage_name):
+                default_storage.delete(storage_name)
 
-    old_name = release.apk_file.name
-    canonical = storage_name.rsplit("/", 1)[-1]
-    with release.apk_file.open("rb") as handle:
-        release.apk_file.save(canonical, File(handle), save=False)
-
-    if old_name and old_name != release.apk_file.name and default_storage.exists(old_name):
-        default_storage.delete(old_name)
