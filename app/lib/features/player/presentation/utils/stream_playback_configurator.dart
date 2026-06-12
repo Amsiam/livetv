@@ -52,6 +52,8 @@ class StreamPlaybackConfigurator {
     required StreamPlaybackSettings settings,
     required List<VideoTrack> tracks,
   }) async {
+    if (kIsWeb) return;
+
     final selectable = tracksMeetingMinBitrate(
       selectableVideoTracks(tracks),
       settings.minBitrateKbps,

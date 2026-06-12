@@ -22,6 +22,9 @@ class AppUpdateService {
   Future<int> currentBuildNumber() async {
     final info = await packageInfo();
     final raw = info.buildNumber;
+    if (kIsWeb) {
+      return int.tryParse(raw) ?? 0;
+    }
     if (Platform.isAndroid) {
       return androidPubspecBuildNumber(raw);
     }

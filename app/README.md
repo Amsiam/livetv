@@ -35,6 +35,22 @@ Override:
 flutter run --dart-define=API_BASE_URL=http://192.168.1.10:8000/v1
 ```
 
+### Web in Chrome (fixed port)
+
+Use the repo script so the app always opens at **http://localhost:37233** (needed for production CORS):
+
+```bash
+# from repo root — API defaults to https://tv.test71.xyz
+./scripts/flutter-run-web.sh
+
+# local Django API instead
+./scripts/flutter-run-web.sh http://127.0.0.1:8000
+```
+
+When calling the **production** API from localhost, set on the server `deploy/.env`:
+
+`CORS_ALLOWED_ORIGINS=https://tv.test71.xyz,http://localhost:37233`
+
 ### Cloudflare Tunnel (any network, HTTPS)
 
 With [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) and the Django API running locally:
