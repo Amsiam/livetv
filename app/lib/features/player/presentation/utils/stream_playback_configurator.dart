@@ -1,8 +1,22 @@
+import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
 
 import '../../domain/stream_format.dart';
 import '../../domain/stream_playback_settings.dart';
 import 'stream_quality_utils.dart';
+
+/// mpv `setProperty` exists on mobile/desktop only; web uses a stub [NativePlayer].
+Future<void> _setNativePlayerProperty(
+  Player player,
+  String name,
+  String value,
+) async {
+  if (kIsWeb) return;
+  final platform = player.platform;
+  if (platform is NativePlayer) {
+    await (platform as dynamic).setProperty(name, value);
+  }
+}
 
 class StreamPlaybackConfigurator {
   const StreamPlaybackConfigurator(this._player);
@@ -10,32 +24,27 @@ class StreamPlaybackConfigurator {
   final Player _player;
 
   Future<void> applyNetworkOptions(String url) async {
-    final platform = _player.platform;
-    if (platform is! NativePlayer) return;
-
     final uri = Uri.tryParse(url);
     final origin = uri?.origin ?? '';
 
-    await platform.setProperty('force-seekable', 'yes');
-    await platform.setProperty('network-timeout', '15');
-    await platform.setProperty(
+    await _setNativePlayerProperty(_player, 'force-seekable', 'yes');
+    await _setNativePlayerProperty(_player, 'network-timeout', '15');
+    await _setNativePlayerProperty(
+      _player,
       'user-agent',
       'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
     );
     if (origin.isNotEmpty) {
-      await platform.setProperty('referrer', '$origin/');
+      await _setNativePlayerProperty(_player, 'referrer', '$origin/');
     }
   }
 
   Future<void> applyBufferSettings(StreamPlaybackSettings settings) async {
-    final platform = _player.platform;
-    if (platform is! NativePlayer) return;
-
     final bytes = settings.bufferBytes;
-    await platform.setProperty('demuxer-max-bytes', '$bytes');
-    await platform.setProperty('demuxer-max-back-bytes', '$bytes');
-    await platform.setProperty('cache-secs', '${settings.cacheSecs}');
+    await _setNativePlayerProperty(_player, 'demuxer-max-bytes', '$bytes');
+    await _setNativePlayerProperty(_player, 'demuxer-max-back-bytes', '$bytes');
+    await _setNativePlayerProperty(_player, 'cache-secs', '${settings.cacheSecs}');
   }
 
   Future<void> applyQuality({
@@ -73,9 +82,7 @@ class StreamPlaybackConfigurator {
     required String url,
     required StreamPlaybackSettings settings,
   }) async {
-    final platform = _player.platform;
-    if (platform is! NativePlayer) return;
-
+    if (kIsWeb) return;
     if (detectStreamFormat(url) != StreamFormat.hls) return;
 
     final presetCap = settings.hlsBitrateCapBps;
@@ -91,10 +98,10 @@ class StreamPlaybackConfigurator {
     }
 
     if (cap != null && cap > 0) {
-      await platform.setProperty('hls-bitrate', '$cap');
+      await _setNativePlayerProperty(_player, 'hls-bitrate', '$cap');
       return;
     }
 
-    await platform.setProperty('hls-bitrate', 'max');
+    await _setNativePlayerProperty(_player, 'hls-bitrate', 'max');
   }
 }

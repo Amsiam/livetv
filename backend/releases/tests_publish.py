@@ -69,3 +69,10 @@ class PublishAppReleaseTests(TestCase):
                     release.download_url,
                     "https://api.example.com/media/releases/livetv-android-v1.0.6-b7.apk",
                 )
+
+                release.refresh_from_db()
+                self.assertEqual(
+                    release.download_url,
+                    "https://api.example.com/media/releases/livetv-android-v1.0.6-b7.apk",
+                )
+                self.assertNotIn("app-arm64-v8a-release", release.download_url)

@@ -6,10 +6,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:livetv_app/core/monitoring/performance_monitoring.dart';
 import 'package:livetv_app/firebase_options.dart';
 
+bool get _crashReportingSupported => !kIsWeb;
+
 /// Initializes Firebase, Performance, and Crashlytics error reporting.
 Future<void> configureCrashReporting() async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await configurePerformanceMonitoring();
+
+  if (!_crashReportingSupported) {
+    FlutterError.onError = FlutterError.presentError;
+    return;
+  }
 
   final crashlytics = FirebaseCrashlytics.instance;
   await crashlytics.setCrashlyticsCollectionEnabled(kReleaseMode);
@@ -32,7 +39,7 @@ Future<void> recordAppError(
   String? reason,
   bool fatal = false,
 }) async {
-  if (!kReleaseMode) return;
+  if (!kReleaseMode || !_crashReportingSupported) return;
 
   await FirebaseCrashlytics.instance.recordError(
     error,
@@ -43,7 +50,7 @@ Future<void> recordAppError(
 }
 
 void recordDioError(DioException error) {
-  if (!kReleaseMode) return;
+  if (!kReleaseMode || !_crashReportingSupported) return;
 
   final request = error.requestOptions;
   FirebaseCrashlytics.instance.setCustomKey('api_path', request.path);

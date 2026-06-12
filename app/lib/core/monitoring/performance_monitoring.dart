@@ -4,8 +4,11 @@ import 'package:flutter/foundation.dart';
 
 const _httpMetricKey = 'firebase_http_metric';
 
+bool get _performanceMonitoringSupported => !kIsWeb;
+
 /// Enables Firebase Performance (app start + network). Release builds only.
 Future<void> configurePerformanceMonitoring() async {
+  if (!_performanceMonitoringSupported) return;
   await FirebasePerformance.instance.setPerformanceCollectionEnabled(kReleaseMode);
 }
 
@@ -13,7 +16,7 @@ Future<void> configurePerformanceMonitoring() async {
 Interceptor dioPerformanceInterceptor() {
   return InterceptorsWrapper(
     onRequest: (options, handler) async {
-      if (!kReleaseMode) {
+      if (!kReleaseMode || !_performanceMonitoringSupported) {
         handler.next(options);
         return;
       }
@@ -59,7 +62,7 @@ Future<void> _finishHttpMetric(
   RequestOptions options,
   int? statusCode,
 ) async {
-  if (!kReleaseMode) return;
+  if (!kReleaseMode || !_performanceMonitoringSupported) return;
 
   final metric = options.extra[_httpMetricKey];
   if (metric is! HttpMetric) return;

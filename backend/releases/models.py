@@ -1,5 +1,7 @@
 from django.db import models
 
+from releases.apk_files import release_apk_upload_to
+
 
 class AppPlatform(models.TextChoices):
     ANDROID = "android", "Android"
@@ -23,7 +25,7 @@ class AppRelease(models.Model):
         help_text="Users below this build are forced to update.",
     )
     apk_file = models.FileField(
-        upload_to="releases/",
+        upload_to=release_apk_upload_to,
         blank=True,
         help_text="Uploaded APK; download URL is filled automatically on save.",
     )
@@ -67,18 +69,10 @@ class AppRelease(models.Model):
         return ""
 
     def save(self, *args, **kwargs):
-        new_apk = bool(
-            self.apk_file and not getattr(self.apk_file, "_committed", True)
-        )
-
         super().save(*args, **kwargs)
 
         if self.apk_file:
-            from releases.apk_files import store_canonical_apk
             from releases.media_urls import public_media_url
-
-            if new_apk:
-                store_canonical_apk(self)
 
             download_url = public_media_url(self.apk_file.name)
             if self.download_url != download_url:
