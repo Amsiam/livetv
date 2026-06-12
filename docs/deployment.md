@@ -42,10 +42,17 @@ SSH into the VPS as root, then:
 apt update && apt upgrade -y
 apt install -y git curl ufw
 
-# Docker + Compose plugin (required for deploy scripts)
+# Docker Engine
 curl -fsSL https://get.docker.com | sh
-apt install -y docker-compose-plugin
 usermod -aG docker $USER
+
+# Compose v2 (required — do NOT use apt docker-compose v1)
+if ! docker compose version >/dev/null 2>&1; then
+  # If `apt install docker-compose-plugin` says "Unable to locate package",
+  # install the plugin binary instead:
+  cd /opt/live-tv/deploy && chmod +x scripts/install-compose-v2.sh && ./scripts/install-compose-v2.sh
+fi
+sudo apt-get remove -y docker-compose 2>/dev/null || true   # drop v1 if present
 
 # Firewall
 ufw allow OpenSSH
@@ -96,7 +103,7 @@ nano .env
 |----------|---------|-------|
 | `DJANGO_SECRET_KEY` | random 50+ chars | `python3 -c "import secrets; print(secrets.token_urlsafe(50))"` |
 | `DJANGO_DEBUG` | `false` | Never `true` in production |
-| `DJANGO_ALLOWED_HOSTS` | `tv.test71.xyz` | Must match `server_name` in nginx |
+| `DJANGO_ALLOWED_HOSTS` | `tv.test71.xyz,localhost,127.0.0.1` | Public domain + localhost for on-server health checks |
 | `PUBLIC_API_URL` | `https://tv.test71.xyz` | Public origin for APK `download_url` (no `/v1`) |
 | `POSTGRES_PASSWORD` | strong password | Change from default |
 | `CORS_ALLOWED_ORIGINS` | `https://yourdomain.com` | Flutter web origin if used |
@@ -153,7 +160,7 @@ chmod +x scripts/*.sh
 ./scripts/deploy.sh
 ```
 
-Deploy scripts call `scripts/compose.sh`, which uses `docker compose` (plugin) or falls back to `docker-compose`. If you see `unknown shorthand flag: 'f' in -f`, the Compose plugin is missing — run `apt install -y docker-compose-plugin` and log out/in, or install `docker-compose` and retry.
+Deploy scripts require **Docker Compose v2** (`docker compose` plugin). Do **not** use apt `docker-compose` v1 — it breaks on Docker Engine 29+ (`KeyError: 'ContainerConfig'` on recreate). Install: `apt install -y docker-compose-plugin`, then `docker compose version`.
 
 Create admin user (from `deploy/` — uses `compose.sh`, not raw `docker compose`):
 
@@ -512,9 +519,20 @@ Or manually:
 
 ```bash
 git pull
-./scripts/compose.sh -f docker-compose.prod.yml up -d --build
+./scripts/compose.sh -f docker-compose.prod.yml up -d --no-recreate postgres redis
+./scripts/compose.sh -f docker-compose.prod.yml up -d --build web nginx celery-worker celery-beat
 ./scripts/manage.sh migrate --noinput
 ```
+
+**Stuck deploy** (permission denied, orphan `b84dcd749db4_deploy_web_1`, nginx restart loop):
+
+```bash
+sudo systemctl restart docker   # if stop/rm fails
+cd /opt/live-tv/deploy
+./scripts/recover.sh
+```
+
+Or manually remove the orphan rows from `docker compose ps -a` (names like `*_deploy_*`), then bring app tier up — leave healthy `deploy_postgres_1` / `deploy_redis_1` alone.
 
 ---
 
@@ -647,10 +665,13 @@ Run after every deploy:
 
 | Problem | Fix |
 |---------|-----|
-| `unknown shorthand flag: 'f' in -f` on deploy | Install Compose: `apt install -y docker-compose-plugin` (or `docker-compose`); scripts use `deploy/scripts/compose.sh` |
+| `unknown shorthand flag: 'f' in -f` | Install Compose v2: `./scripts/install-compose-v2.sh` |
+| `Unable to locate package docker-compose-plugin` | Docker CE apt repo not configured — use `./scripts/install-compose-v2.sh` |
+| `KeyError: 'ContainerConfig'` on recreate | Remove apt `docker-compose` v1; run `install-compose-v2.sh`; `docker rm -f deploy_web_1` then `./scripts/deploy.sh` |
+| `cannot stop container` / `permission denied` | `sudo systemctl restart docker`; remove stuck container: `sudo docker rm -f deploy_web_1`; redeploy app only (below); do **not** recreate postgres/redis unless necessary |
 | nginx `read-only file system` / mount error | Pull latest (nginx config is in the image, not bind-mounted); run `./scripts/deploy.sh` again |
 | 502 Bad Gateway | `./scripts/compose.sh -f docker-compose.prod.yml logs web` — check migrations, env vars |
-| 400 DisallowedHost | Add domain to `DJANGO_ALLOWED_HOSTS`, restart web |
+| 400 on `localhost:8134` / DisallowedHost | Add `localhost,127.0.0.1` to `DJANGO_ALLOWED_HOSTS`, or use `./scripts/health-check.sh` (sends public `Host` from `PUBLIC_API_URL`); restart web after `.env` change |
 | API empty after admin edit | Wait 60s for cache TTL, or flush Redis: `./scripts/compose.sh -f docker-compose.prod.yml exec redis redis-cli FLUSHDB` |
 | Cloudflare not caching | Check Cache Rules; ensure `Cache-Control` headers present (`curl -I`) |
 | Telegram not sending | Verify token/chat ID; run `./scripts/manage.sh test_telegram`; check `./scripts/compose.sh -f docker-compose.prod.yml logs web` |
