@@ -7,9 +7,9 @@ Deploy the **Django API** on **Hostinger KVM4** with **Docker Compose**, **Cloud
 ```
 Flutter app
     ↓
-Cloudflare CDN + WAF  (api.yourdomain.com)
+Cloudflare CDN + WAF  (tv.test71.xyz)
     ↓
-Nginx :80 on KVM4
+Nginx :8134 on KVM4 (origin; Cloudflare Tunnel or DNS)
     ↓
 Gunicorn (Django + DRF + Admin)
     ↓
@@ -27,7 +27,7 @@ Video streams go **directly** from third-party HLS URLs to the app — not throu
 | Item | Notes |
 |------|-------|
 | Hostinger KVM4 | Ubuntu 24.04 recommended |
-| Domain | e.g. `api.yourdomain.com` |
+| Domain | e.g. `tv.test71.xyz` |
 | Cloudflare account | Free plan is fine |
 | Telegram bot | Optional, for channel failure alerts |
 | Git repo access | On the server |
@@ -50,6 +50,8 @@ usermod -aG docker $USER
 ufw allow OpenSSH
 ufw allow 80/tcp
 ufw allow 443/tcp
+# Optional: only if exposing Nginx directly (not using Cloudflare Tunnel)
+# ufw allow 8134/tcp
 ufw enable
 ```
 
@@ -93,8 +95,8 @@ nano .env
 |----------|---------|-------|
 | `DJANGO_SECRET_KEY` | random 50+ chars | `python3 -c "import secrets; print(secrets.token_urlsafe(50))"` |
 | `DJANGO_DEBUG` | `false` | Never `true` in production |
-| `DJANGO_ALLOWED_HOSTS` | `api.yourdomain.com` | Your API subdomain |
-| `PUBLIC_API_URL` | `https://api.yourdomain.com` | Public origin for APK `download_url` (no `/v1`) |
+| `DJANGO_ALLOWED_HOSTS` | `tv.test71.xyz` | Must match `server_name` in nginx |
+| `PUBLIC_API_URL` | `https://tv.test71.xyz` | Public origin for APK `download_url` (no `/v1`) |
 | `POSTGRES_PASSWORD` | strong password | Change from default |
 | `CORS_ALLOWED_ORIGINS` | `https://yourdomain.com` | Flutter web origin if used |
 
@@ -124,13 +126,19 @@ nano .env
 
 ## 4. Configure Nginx
 
-Edit `deploy/nginx/livetv.conf`:
+Edit `deploy/nginx/livetv.conf` before first deploy:
 
-```nginx
-server_name api.yourdomain.com;   # ← your subdomain
-```
+| Setting | Default in repo | Must match |
+|---------|-----------------|------------|
+| `server_name` | `tv.test71.xyz` | `DJANGO_ALLOWED_HOSTS` in `deploy/.env` |
+| `listen` | `8134` | `NGINX_PUBLISH_PORT` in `deploy/.env` (compose maps host → container) |
+| `upstream django` | `web:8123` | `GUNICORN_BIND=0.0.0.0:8123` on the **web** service (set in compose) |
 
 Cloudflare real-IP blocks are already included. Update from [Cloudflare IP ranges](https://www.cloudflare.com/ips/) if needed.
+
+**Ports:** Gunicorn listens on **8123** inside Docker; Nginx proxies to it and publishes **8134** on the host. Local dev (`runserver`) still uses **8000** — production ports only.
+
+**Cloudflare:** Orange-cloud proxied DNS only forwards **80/443** to the origin. With origin on **8134**, use **Cloudflare Tunnel** (§6 Option B) pointing at `http://127.0.0.1:8134`, or grey-cloud DNS and open `8134` on the firewall.
 
 ---
 
@@ -152,8 +160,8 @@ docker compose -f docker-compose.prod.yml exec web \
 Verify:
 
 ```bash
-./scripts/health-check.sh http://localhost/v1/health/
-curl -s http://localhost/v1/matches/ | head
+./scripts/health-check.sh
+curl -s http://localhost:8134/v1/matches/ | head
 ```
 
 ---
@@ -164,11 +172,11 @@ curl -s http://localhost/v1/matches/ | head
 
 | Type | Name | Content | Proxy |
 |------|------|---------|-------|
-| A | `api` | KVM4 public IP | Proxied (orange cloud) |
+| A or CNAME | `tv` (or tunnel CNAME) | KVM4 IP or tunnel | Proxied (orange cloud) |
 
 ### Option B — Cloudflare Tunnel (`cloudflared`)
 
-If you have **cloudflared** installed, you can skip opening port 80 publicly. Run a named tunnel on the VPS that connects to local Nginx. Full steps: **[deploy/cloudflared/README.md](../deploy/cloudflared/README.md)**.
+If you have **cloudflared** installed, you can skip opening the origin port publicly. Run a named tunnel on the VPS that connects to local Nginx on **8134**. Full steps: **[deploy/cloudflared/README.md](../deploy/cloudflared/README.md)**.
 
 For **local dev** (Flutter on a physical phone):
 
@@ -183,7 +191,7 @@ Add `.trycloudflare.com` to `DJANGO_ALLOWED_HOSTS` while using quick tunnels.
 
 - **Encryption mode:** Full (strict)
 - Generate **Origin Certificate** in Cloudflare → SSL/TLS → Origin Server
-- Install on Nginx if terminating TLS on origin (optional; Cloudflare → HTTP :80 is OK with Full mode)
+- Install on Nginx if terminating TLS on origin (optional; Cloudflare Tunnel → HTTP `:8134` is OK with Full mode)
 
 ### Cache Rules
 
@@ -243,7 +251,7 @@ Each APK filename includes the version (`livetv-android-v1.0.4-b5.apk`), so edge
 **Match API:**
 
 ```bash
-curl -I https://api.yourdomain.com/v1/matches/
+curl -I https://tv.test71.xyz/v1/matches/
 ```
 
 Look for:
@@ -256,8 +264,8 @@ cache-control: public, max-age=60, s-maxage=60
 **APK downloads** (replace with your published filename):
 
 ```bash
-curl -I https://api.yourdomain.com/media/releases/livetv-android-v1.0.4-b5.apk
-curl -I https://api.yourdomain.com/media/releases/livetv-android-v1.0.4-b5.apk
+curl -I https://tv.test71.xyz/media/releases/livetv-android-v1.0.4-b5.apk
+curl -I https://tv.test71.xyz/media/releases/livetv-android-v1.0.4-b5.apk
 ```
 
 First request: `cf-cache-status: MISS` (origin serves once). Second request: `cf-cache-status: HIT`. Response should include:
@@ -271,7 +279,7 @@ Optional: after `./scripts/publish-apk.sh`, run one `curl` to the new APK URL to
 **TV channel API:**
 
 ```bash
-curl -I "https://api.yourdomain.com/v1/tv-channels/?grouped=true"
+curl -I "https://tv.test71.xyz/v1/tv-channels/?grouped=true"
 ```
 
 ---
@@ -512,19 +520,19 @@ The app does **not** read the API URL from a config file at runtime on release b
 
 ### Production APK (automated)
 
-Set `PUBLIC_API_URL=https://api.yourdomain.com` in `deploy/.env` (no `/v1` suffix).
+Set `PUBLIC_API_URL=https://tv.test71.xyz` in `deploy/.env` (no `/v1` suffix).
 
 **One command** — build, store APK on the server, register **App release**:
 
 ```bash
 # On the VPS:
-./scripts/publish-apk.sh https://api.yourdomain.com
+./scripts/publish-apk.sh https://tv.test71.xyz
 
 # From laptop → remote VPS:
-./scripts/publish-apk.sh https://api.yourdomain.com --remote deploy@your-vps
+./scripts/publish-apk.sh https://tv.test71.xyz --remote deploy@your-vps
 ```
 
-APKs land in `media/releases/` and are served at `https://api.yourdomain.com/media/releases/...`. The **App release** row and `download_url` are created automatically.
+APKs land in `media/releases/` and are served at `https://tv.test71.xyz/media/releases/...`. The **App release** row and `download_url` are created automatically.
 
 ### APK distribution (free CDN)
 
@@ -541,8 +549,8 @@ At 30k users × ~32 MB, origin bandwidth stays small (one fetch per edge PoP per
 Manual alternative:
 
 ```bash
-./scripts/flutter-build-apk.sh https://api.yourdomain.com
-cd backend && PUBLIC_API_URL=https://api.yourdomain.com \
+./scripts/flutter-build-apk.sh https://tv.test71.xyz
+cd backend && PUBLIC_API_URL=https://tv.test71.xyz \
   uv run python manage.py publish_app_release \
   --apk ../app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
   --pubspec ../app/pubspec.yaml
@@ -556,9 +564,9 @@ Plain `flutter build apk` without `--dart-define=API_BASE_URL=...` defaults to `
 
 On launch the app calls `GET /v1/app-update/?platform=android&build=N` (`N` = pubspec `+N`, e.g. `1.0.0+1` → `1`). Split APKs encode Android `versionCode` as `abi×1000+N`; the app normalizes that before calling the API. Responses are cached at Redis + Cloudflare (`APP_UPDATE_CACHE_TTL`, default **5 minutes**); cache clears when you save an **App release**.
 
-**APK size:** `./scripts/flutter-build-apk.sh` builds an **arm64-only** split APK (~32 MB), similar to what Play serves per device. Pass `--universal` for a single fat APK (~97 MB, all ABIs). For Google Play, build an App Bundle: `cd app && flutter build appbundle --dart-define=API_BASE_URL=https://api.yourdomain.com/v1`.
+**APK size:** `./scripts/flutter-build-apk.sh` builds an **arm64-only** split APK (~32 MB), similar to what Play serves per device. Pass `--universal` for a single fat APK (~97 MB, all ABIs). For Google Play, build an App Bundle: `cd app && flutter build appbundle --dart-define=API_BASE_URL=https://tv.test71.xyz/v1`.
 
-Workflow: bump `version: x.y.z+N` in `app/pubspec.yaml` → `./scripts/publish-apk.sh https://api.yourdomain.com` → users get prompted on next launch.
+Workflow: bump `version: x.y.z+N` in `app/pubspec.yaml` → `./scripts/publish-apk.sh https://tv.test71.xyz` → users get prompted on next launch.
 
 ### Local dev on a physical phone
 
@@ -618,16 +626,16 @@ Hostinger also provides weekly VPS snapshots — enable in the control panel.
 
 Run after every deploy:
 
-- [ ] `curl https://api.yourdomain.com/v1/health/` → `{"status":"ok"}`
-- [ ] `curl https://api.yourdomain.com/v1/matches/` → JSON list
-- [ ] Admin login at `https://api.yourdomain.com/admin/`
+- [ ] `curl https://tv.test71.xyz/v1/health/` → `{"status":"ok"}`
+- [ ] `curl https://tv.test71.xyz/v1/matches/` → JSON list
+- [ ] Admin login at `https://tv.test71.xyz/admin/`
 - [ ] Second `GET /v1/matches/` and `GET /v1/tv-channels/?grouped=true` show `cf-cache-status: HIT`
 - [ ] `docker compose -f docker-compose.prod.yml ps` — web, nginx, postgres, redis, celery-worker, celery-beat all `Up`
-- [ ] `./scripts/health-check.sh http://localhost/v1/health/` — API + Celery ping OK
+- [ ] `./scripts/health-check.sh` — API on `:8134` + Celery ping OK
 - [ ] `docker compose -f docker-compose.prod.yml exec web uv run python manage.py test_telegram` (if configured)
 - [ ] Create test match + channel in admin → appears in API within 60s (or after cache TTL)
-- [ ] `curl "https://api.yourdomain.com/v1/app-update/?platform=android&build=1"` → JSON update payload
-- [ ] Release APK built with `./scripts/flutter-build-apk.sh https://api.yourdomain.com` loads matches on a real device
+- [ ] `curl "https://tv.test71.xyz/v1/app-update/?platform=android&build=1"` → JSON update payload
+- [ ] Release APK built with `./scripts/flutter-build-apk.sh https://tv.test71.xyz` loads matches on a real device
 
 ---
 
@@ -641,7 +649,7 @@ Run after every deploy:
 | Cloudflare not caching | Check Cache Rules; ensure `Cache-Control` headers present (`curl -I`) |
 | Telegram not sending | Verify token/chat ID; run `test_telegram`; check `docker compose logs web` |
 | Static/admin CSS broken | `docker compose exec web uv run python manage.py collectstatic --noinput` |
-| Flutter app “network error” on phone | Rebuild with `./scripts/flutter-build-apk.sh https://api.yourdomain.com` — emulator default URL does not work on devices |
+| Flutter app “network error” on phone | Rebuild with `./scripts/flutter-build-apk.sh https://tv.test71.xyz` — emulator default URL does not work on devices |
 | `failure_count` not rising in admin | App must hit playback timeout (~25s) or error; reports are cooldown-limited (30s/IP); check API reachability from the phone |
 | In-app update not offered | Add **App release** in admin; wait up to `APP_UPDATE_CACHE_TTL` (default 5 min) or purge Cloudflare cache for `/v1/app-update`; ensure `download_url` is HTTPS |
 
@@ -662,7 +670,7 @@ docker compose -f docker-compose.prod.yml logs -f nginx
 | Compose file | `docker-compose.yml` (root) | `deploy/docker-compose.prod.yml` |
 | Env file | `backend/.env` | `deploy/.env` |
 | Server | `runserver` | Gunicorn + Nginx |
-| Flutter API URL | Tunnel / LAN / emulator `10.0.2.2` | `--dart-define=API_BASE_URL=https://api.yourdomain.com/v1` |
+| Flutter API URL | Tunnel / LAN / emulator `10.0.2.2` | `--dart-define=API_BASE_URL=https://tv.test71.xyz/v1` |
 | Cloudflare | Optional (quick tunnel for phones) | Required for scale |
 | DEBUG | `true` | `false` |
 

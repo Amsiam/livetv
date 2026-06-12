@@ -3,7 +3,7 @@ set -euo pipefail
 
 DEPLOY_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
-API_URL="${1:-http://localhost/v1/health/}"
+API_URL="${1:-http://localhost:8134/v1/health/}"
 
 cd "$DEPLOY_DIR"
 

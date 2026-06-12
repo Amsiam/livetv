@@ -48,7 +48,7 @@ Notes:
 Alternative to exposing port **80** on the public internet. Traffic flows:
 
 ```
-Flutter app → Cloudflare CDN/WAF → cloudflared (on VPS) → Nginx :80 → Django
+Flutter app → Cloudflare CDN/WAF → cloudflared (on VPS) → Nginx :8134 → Gunicorn :8123
 ```
 
 ### Setup
@@ -57,7 +57,7 @@ Flutter app → Cloudflare CDN/WAF → cloudflared (on VPS) → Nginx :80 → Dj
 # On the VPS (once)
 cloudflared tunnel login
 cloudflared tunnel create livetv-api
-cloudflared tunnel route dns livetv-api api.yourdomain.com
+cloudflared tunnel route dns livetv-api tv.test71.xyz
 
 sudo mkdir -p /etc/cloudflared
 sudo cp ~/.cloudflared/<tunnel-id>.json /etc/cloudflared/
@@ -74,19 +74,13 @@ In Cloudflare DNS, the `cloudflared tunnel route dns` command creates a **CNAME*
 
 ### Hardening (optional)
 
-If all traffic goes through the tunnel, you can **close public port 80**:
-
-```bash
-ufw delete allow 80/tcp
-```
-
-Nginx only needs to listen on `127.0.0.1:80` (default in Docker publish `127.0.0.1:80:80` if you change compose).
+If all traffic goes through the tunnel, you do **not** need to open **8134** on the public firewall — cloudflared connects to `127.0.0.1:8134` on the host (see `deploy/cloudflared/config.yml.example`).
 
 ### Django
 
 ```bash
 # deploy/.env
-DJANGO_ALLOWED_HOSTS=api.yourdomain.com
+DJANGO_ALLOWED_HOSTS=tv.test71.xyz
 DJANGO_DEBUG=false
 ```
 
@@ -98,7 +92,7 @@ Cache rules in [deployment.md](../../docs/deployment.md) section 6 still apply �
 
 In [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) → Access → Applications:
 
-- Application URL: `https://api.yourdomain.com/admin`
+- Application URL: `https://tv.test71.xyz/admin`
 - Policy: e.g. email OTP or Google login for your staff only
 
 Public `/v1/*` stays open; admin gets an extra login layer.
