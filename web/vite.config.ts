@@ -20,7 +20,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          videojs: ['@videojs/react', '@videojs/react/video'],
+          videojs: ['@videojs/react', '@videojs/react/video', '@videojs/react/media/hls-video'],
         },
       },
     },

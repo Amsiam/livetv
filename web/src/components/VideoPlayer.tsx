@@ -60,12 +60,18 @@ import {
   VolumeSlider,
   type RenderProp,
 } from '@videojs/react';
+import { HlsVideo } from '@videojs/react/media/hls-video';
 import { Video, videoFeatures } from '@videojs/react/video';
 import './player.css';
 
 const SEEK_TIME = 10;
 
 const Player = createPlayer({ features: videoFeatures });
+
+function isHlsUrl(url: string): boolean {
+  const lower = url.toLowerCase();
+  return lower.includes('.m3u8') || lower.includes('mpegurl');
+}
 
 const TOP_STATUS_ACTIONS = ['toggleSubtitles', 'toggleFullscreen', 'togglePictureInPicture'] as const;
 const CENTER_STATUS_ACTIONS = ['togglePaused'] as const;
@@ -131,7 +137,11 @@ function MediaSkinPlayer({ src, className, poster, onError, onPlaying, ...rest }
     <Player.Provider key={src}>
       <PlaybackCallbacks onError={onError} onPlaying={onPlaying} />
       <Container className={`media-default-skin media-default-skin--video ${className ?? ''}`} {...rest}>
-        <Video src={src} playsInline autoPlay />
+        {isHlsUrl(src) ? (
+          <HlsVideo src={src} playsInline autoPlay />
+        ) : (
+          <Video src={src} playsInline autoPlay />
+        )}
 
         {poster ? (
           <Poster src={isString(poster) ? poster : undefined} render={isRenderProp(poster) ? poster : undefined} />
