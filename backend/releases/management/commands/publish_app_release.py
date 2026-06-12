@@ -4,6 +4,7 @@ from django.conf import settings
 from django.core.files import File
 from django.core.management.base import BaseCommand, CommandError
 
+from releases.apk_files import canonical_apk_basename
 from releases.models import AppPlatform, AppRelease
 from releases.pubspec import parse_pubspec_version
 
@@ -74,7 +75,7 @@ class Command(BaseCommand):
             )
 
         platform = options["platform"]
-        filename = f"livetv-{platform}-v{version_name}-b{build_number}.apk"
+        filename = canonical_apk_basename(platform, version_name, build_number)
 
         release, created = AppRelease.objects.update_or_create(
             platform=platform,

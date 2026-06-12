@@ -67,12 +67,24 @@ class AppRelease(models.Model):
         return ""
 
     def save(self, *args, **kwargs):
-        if self.apk_file:
-            from releases.media_urls import public_media_url
-
-            self.download_url = public_media_url(self.apk_file.name)
+        new_apk = bool(
+            self.apk_file and not getattr(self.apk_file, "_committed", True)
+        )
 
         super().save(*args, **kwargs)
+
+        if self.apk_file:
+            from releases.apk_files import store_canonical_apk
+            from releases.media_urls import public_media_url
+
+            if new_apk:
+                store_canonical_apk(self)
+
+            download_url = public_media_url(self.apk_file.name)
+            if self.download_url != download_url:
+                type(self).objects.filter(pk=self.pk).update(download_url=download_url)
+                self.download_url = download_url
+
         from releases.cache import invalidate_latest_release_cache
 
         invalidate_latest_release_cache(self.platform)
