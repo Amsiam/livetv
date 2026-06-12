@@ -141,6 +141,8 @@ Cloudflare real-IP blocks are already included. Update from [Cloudflare IP range
 
 **Cloudflare:** Orange-cloud proxied DNS only forwards **80/443** to the origin. With origin on **8134**, use **Cloudflare Tunnel** (§6 Option B) pointing at `http://127.0.0.1:8134`, or grey-cloud DNS and open `8134` on the firewall.
 
+The config is **baked into the nginx image** (`deploy/nginx/Dockerfile`), not bind-mounted — avoids read-only `/opt` issues on some VPS hosts. After editing `livetv.conf`, redeploy with `./scripts/deploy.sh` (rebuilds nginx).
+
 ---
 
 ## 5. First deploy
@@ -647,6 +649,7 @@ Run after every deploy:
 | Problem | Fix |
 |---------|-----|
 | `unknown shorthand flag: 'f' in -f` on deploy | Install Compose: `apt install -y docker-compose-plugin` (or `docker-compose`); scripts use `deploy/scripts/compose.sh` |
+| nginx `read-only file system` / mount error | Pull latest (nginx config is in the image, not bind-mounted); run `./scripts/deploy.sh` again |
 | 502 Bad Gateway | `./scripts/compose.sh -f docker-compose.prod.yml logs web` — check migrations, env vars |
 | 400 DisallowedHost | Add domain to `DJANGO_ALLOWED_HOSTS`, restart web |
 | API empty after admin edit | Wait 60s for cache TTL, or flush Redis: `docker compose exec redis redis-cli FLUSHDB` |
