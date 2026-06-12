@@ -155,11 +155,10 @@ chmod +x scripts/*.sh
 
 Deploy scripts call `scripts/compose.sh`, which uses `docker compose` (plugin) or falls back to `docker-compose`. If you see `unknown shorthand flag: 'f' in -f`, the Compose plugin is missing — run `apt install -y docker-compose-plugin` and log out/in, or install `docker-compose` and retry.
 
-Create admin user:
+Create admin user (from `deploy/` — uses `compose.sh`, not raw `docker compose`):
 
 ```bash
-docker compose -f docker-compose.prod.yml exec web \
-  uv run python manage.py createsuperuser
+./scripts/manage.sh createsuperuser
 ```
 
 Verify:
@@ -334,7 +333,7 @@ After admin edits, clients may still see old data for up to **60s** at Cloudflar
 **Manual flush (troubleshooting):**
 
 ```bash
-docker compose -f docker-compose.prod.yml exec redis redis-cli FLUSHDB
+./scripts/compose.sh -f docker-compose.prod.yml exec redis redis-cli FLUSHDB
 ```
 
 ### Layer 3 — Flutter app (in-memory session)
@@ -459,24 +458,24 @@ You do not need one admin row per source when using catalog pick.
 Verify after deploy:
 
 ```bash
-docker compose -f docker-compose.prod.yml ps celery-worker celery-beat
-docker compose -f docker-compose.prod.yml exec celery-worker \
+./scripts/compose.sh -f docker-compose.prod.yml ps celery-worker celery-beat
+./scripts/compose.sh -f docker-compose.prod.yml exec celery-worker \
   uv run celery -A config inspect ping --timeout 10
 ```
 
 Manual one-shot (optional):
 
 ```bash
-docker compose -f docker-compose.prod.yml exec celery-worker \
+./scripts/compose.sh -f docker-compose.prod.yml exec celery-worker \
   uv run celery -A config call health.run_all_maintenance
 ```
 
 Equivalent management commands (debugging):
 
 ```bash
-docker compose -f docker-compose.prod.yml exec web uv run python manage.py sync_livetv_collector
-docker compose -f docker-compose.prod.yml exec web uv run python manage.py check_streams
-docker compose -f docker-compose.prod.yml exec web uv run python manage.py reactivate_streams
+./scripts/manage.sh sync_livetv_collector
+./scripts/manage.sh check_streams
+./scripts/manage.sh reactivate_streams
 ```
 
 ---
@@ -489,13 +488,13 @@ docker compose -f docker-compose.prod.yml exec web uv run python manage.py react
 4. Restart backend containers:
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d web celery-worker celery-beat
+./scripts/compose.sh -f docker-compose.prod.yml up -d web celery-worker celery-beat
 ```
 
 5. Test:
 
 ```bash
-docker compose -f docker-compose.prod.yml exec web uv run python manage.py test_telegram
+./scripts/manage.sh test_telegram
 ```
 
 Alerts fire when a channel is **deactivated** after hitting the failure threshold.
@@ -513,8 +512,8 @@ Or manually:
 
 ```bash
 git pull
-docker compose -f docker-compose.prod.yml up -d --build
-docker compose -f docker-compose.prod.yml exec -T web uv run python manage.py migrate --noinput
+./scripts/compose.sh -f docker-compose.prod.yml up -d --build
+./scripts/manage.sh migrate --noinput
 ```
 
 ---
@@ -609,7 +608,7 @@ crontab -e
 ```
 
 ```cron
-0 3 * * * docker compose -f /opt/live-tv/deploy/docker-compose.prod.yml exec -T postgres pg_dump -U livetv livetv | gzip > /opt/backups/livetv-$(date +\%Y\%m\%d).sql.gz
+0 3 * * * /opt/live-tv/deploy/scripts/compose.sh -f /opt/live-tv/deploy/docker-compose.prod.yml exec -T postgres pg_dump -U livetv livetv | gzip > /opt/backups/livetv-$(date +\%Y\%m\%d).sql.gz
 ```
 
 ```bash
@@ -620,7 +619,7 @@ mkdir -p /opt/backups
 
 ```bash
 gunzip -c /opt/backups/livetv-20260101.sql.gz | \
-  docker compose -f docker-compose.prod.yml exec -T postgres psql -U livetv livetv
+  ./scripts/compose.sh -f docker-compose.prod.yml exec -T postgres psql -U livetv livetv
 ```
 
 Hostinger also provides weekly VPS snapshots — enable in the control panel.
@@ -635,9 +634,9 @@ Run after every deploy:
 - [ ] `curl https://tv.test71.xyz/v1/matches/` → JSON list
 - [ ] Admin login at `https://tv.test71.xyz/admin/`
 - [ ] Second `GET /v1/matches/` and `GET /v1/tv-channels/?grouped=true` show `cf-cache-status: HIT`
-- [ ] `docker compose -f docker-compose.prod.yml ps` — web, nginx, postgres, redis, celery-worker, celery-beat all `Up`
+- [ ] `./scripts/compose.sh -f docker-compose.prod.yml ps` — web, nginx, postgres, redis, celery-worker, celery-beat all `Up`
 - [ ] `./scripts/health-check.sh` — API on `:8134` + Celery ping OK
-- [ ] `docker compose -f docker-compose.prod.yml exec web uv run python manage.py test_telegram` (if configured)
+- [ ] `./scripts/manage.sh test_telegram` (if configured)
 - [ ] Create test match + channel in admin → appears in API within 60s (or after cache TTL)
 - [ ] `curl "https://tv.test71.xyz/v1/app-update/?platform=android&build=1"` → JSON update payload
 - [ ] Release APK built with `./scripts/flutter-build-apk.sh https://tv.test71.xyz` loads matches on a real device
@@ -652,10 +651,10 @@ Run after every deploy:
 | nginx `read-only file system` / mount error | Pull latest (nginx config is in the image, not bind-mounted); run `./scripts/deploy.sh` again |
 | 502 Bad Gateway | `./scripts/compose.sh -f docker-compose.prod.yml logs web` — check migrations, env vars |
 | 400 DisallowedHost | Add domain to `DJANGO_ALLOWED_HOSTS`, restart web |
-| API empty after admin edit | Wait 60s for cache TTL, or flush Redis: `docker compose exec redis redis-cli FLUSHDB` |
+| API empty after admin edit | Wait 60s for cache TTL, or flush Redis: `./scripts/compose.sh -f docker-compose.prod.yml exec redis redis-cli FLUSHDB` |
 | Cloudflare not caching | Check Cache Rules; ensure `Cache-Control` headers present (`curl -I`) |
-| Telegram not sending | Verify token/chat ID; run `test_telegram`; check `docker compose logs web` |
-| Static/admin CSS broken | `docker compose exec web uv run python manage.py collectstatic --noinput` |
+| Telegram not sending | Verify token/chat ID; run `./scripts/manage.sh test_telegram`; check `./scripts/compose.sh -f docker-compose.prod.yml logs web` |
+| Static/admin CSS broken | `./scripts/manage.sh collectstatic --noinput` |
 | Flutter app “network error” on phone | Rebuild with `./scripts/flutter-build-apk.sh https://tv.test71.xyz` — emulator default URL does not work on devices |
 | `failure_count` not rising in admin | App must hit playback timeout (~25s) or error; reports are cooldown-limited (30s/IP); check API reachability from the phone |
 | In-app update not offered | Add **App release** in admin; wait up to `APP_UPDATE_CACHE_TTL` (default 5 min) or purge Cloudflare cache for `/v1/app-update`; ensure `download_url` is HTTPS |
@@ -664,8 +663,8 @@ Run after every deploy:
 
 ```bash
 cd /opt/live-tv/deploy
-docker compose -f docker-compose.prod.yml logs -f web
-docker compose -f docker-compose.prod.yml logs -f nginx
+./scripts/compose.sh -f docker-compose.prod.yml logs -f web
+./scripts/compose.sh -f docker-compose.prod.yml logs -f nginx
 ```
 
 ---
