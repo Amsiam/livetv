@@ -16,6 +16,7 @@ from catalog.models import (
 from catalog.normalize import fit_catalog_entry
 from catalog.probe import filter_reachable_entries
 from catalog.stream_urls import is_hls_stream_url
+from config.log_extra import log_extra
 
 logger = logging.getLogger(__name__)
 
@@ -84,10 +85,16 @@ def iter_catalog_entries(payload: dict, region: str):
             )
             if truncated_fields:
                 logger.warning(
-                    "Truncated catalog fields %s for %r in %s",
+                    "Truncated display fields %s (name=%r len=%s)",
                     ", ".join(truncated_fields),
                     name[:80],
-                    region,
+                    len(name),
+                    extra=log_extra(
+                        component="catalog.sync",
+                        region=region,
+                        truncated_fields=",".join(truncated_fields),
+                        name_len=len(name),
+                    ),
                 )
                 entry["_truncated_fields"] = truncated_fields
             yield entry
@@ -96,6 +103,8 @@ def iter_catalog_entries(payload: dict, region: str):
 def upsert_catalog_entries(
     entries: list[dict],
     sync_started,
+    *,
+    region: str = "",
 ) -> tuple[int, int]:
     """Upsert catalog rows in batches. Returns (created, updated)."""
     created = 0
@@ -122,13 +131,13 @@ def upsert_catalog_entries(
         )
 
         if len(batch) >= chunk_size:
-            batch_created, batch_updated = _upsert_batch(batch)
+            batch_created, batch_updated = _upsert_batch(batch, region=region)
             created += batch_created
             updated += batch_updated
             batch.clear()
 
     if batch:
-        batch_created, batch_updated = _upsert_batch(batch)
+        batch_created, batch_updated = _upsert_batch(batch, region=region)
         created += batch_created
         updated += batch_updated
 
@@ -187,10 +196,23 @@ def sync_region(
     if verify_streams is None:
         verify_streams = getattr(settings, "CATALOG_SYNC_PROBE_STREAMS", False)
 
+    logger.info(
+        "Catalog sync region started",
+        extra=log_extra(
+            component="catalog.sync",
+            region=region,
+            verify_streams=verify_streams,
+            deactivate_missing=deactivate_missing,
+        ),
+    )
+
     try:
         payload = fetch_region_payload(region)
     except requests.RequestException:
-        logger.exception("Failed to fetch region %s", region)
+        logger.exception(
+            "Failed to fetch region payload",
+            extra=log_extra(component="catalog.sync", region=region),
+        )
         result.errors += 1
         return result
 
@@ -200,22 +222,93 @@ def sync_region(
     for entry in entries:
         entry.pop("_truncated_fields", None)
 
+    logger.info(
+        "Catalog sync region parsed upstream=%s entries=%s truncated=%s source_date=%s",
+        region,
+        len(entries),
+        result.truncated,
+        result.source_date,
+        extra=log_extra(
+            component="catalog.sync",
+            region=region,
+            entry_count=len(entries),
+            truncated=result.truncated,
+        ),
+    )
+
     if verify_streams and entries:
         entries, skipped = filter_reachable_entries(entries)
         result.skipped = skipped
         if skipped:
-            logger.info("Region %s: skipped %s unreachable stream URLs", region, skipped)
+            logger.info(
+                "Skipped unreachable stream URLs in %s: %s",
+                region,
+                skipped,
+                extra=log_extra(
+                    component="catalog.sync",
+                    region=region,
+                    skipped=skipped,
+                ),
+            )
 
-    result.created, result.updated = upsert_catalog_entries(entries, sync_started)
+    try:
+        result.created, result.updated = upsert_catalog_entries(
+            entries,
+            sync_started,
+            region=region,
+        )
+    except Exception:
+        logger.exception(
+            "Catalog upsert failed for region %s",
+            region,
+            extra=log_extra(
+                component="catalog.sync",
+                region=region,
+                entry_count=len(entries),
+            ),
+        )
+        result.errors += 1
+        return result
 
     if deactivate_missing:
         result.deactivated = finalize_region_sync(region, sync_started)
 
     if entries:
-        propagate_linked_match_channels(
+        linked = propagate_linked_match_channels(
             CatalogChannel.objects.filter(region=region, last_seen_at=sync_started)
         )
+        if linked:
+            logger.info(
+                "Propagated catalog updates to %s match channel(s) in %s",
+                linked,
+                region,
+                extra=log_extra(
+                    component="catalog.sync",
+                    region=region,
+                    match_channels_updated=linked,
+                ),
+            )
 
+    logger.info(
+        "Catalog sync region finished created=%s updated=%s skipped=%s "
+        "deactivated=%s truncated=%s errors=%s",
+        result.created,
+        result.updated,
+        result.skipped,
+        result.deactivated,
+        result.truncated,
+        result.errors,
+        extra=log_extra(
+            component="catalog.sync",
+            region=region,
+            created=result.created,
+            updated=result.updated,
+            skipped=result.skipped,
+            deactivated=result.deactivated,
+            truncated=result.truncated,
+            errors=result.errors,
+        ),
+    )
     return result
 
 
@@ -242,31 +335,66 @@ def propagate_linked_match_channels(catalog_qs) -> int:
     return updated
 
 
-def _upsert_batch(batch: list[CatalogChannel]) -> tuple[int, int]:
+def _upsert_batch(batch: list[CatalogChannel], *, region: str = "") -> tuple[int, int]:
     existing = set(
         CatalogChannel.objects.filter(
             external_key__in=[item.external_key for item in batch]
         ).values_list("external_key", flat=True)
     )
-    CatalogChannel.objects.bulk_create(
-        batch,
-        update_conflicts=True,
-        unique_fields=["external_key"],
-        update_fields=[
-            "group_key",
-            "region",
-            "category",
-            "name",
-            "logo_url",
-            "stream_url",
-            "source_url",
-            "source_date",
-            "last_seen_at",
-            "updated_at",
-        ],
-    )
+    try:
+        CatalogChannel.objects.bulk_create(
+            batch,
+            update_conflicts=True,
+            unique_fields=["external_key"],
+            update_fields=[
+                "group_key",
+                "region",
+                "category",
+                "name",
+                "logo_url",
+                "stream_url",
+                "source_url",
+                "source_date",
+                "last_seen_at",
+                "updated_at",
+            ],
+        )
+    except Exception:
+        sample = batch[0]
+        logger.exception(
+            "Catalog upsert batch failed size=%s sample_name=%r "
+            "name_len=%s stream_url_len=%s category_len=%s",
+            len(batch),
+            sample.name[:120],
+            len(sample.name),
+            len(sample.stream_url),
+            len(sample.category),
+            extra=log_extra(
+                component="catalog.sync",
+                region=region or sample.region,
+                batch_size=len(batch),
+                name_len=len(sample.name),
+                stream_url_len=len(sample.stream_url),
+                category_len=len(sample.category),
+                logo_url_len=len(sample.logo_url),
+            ),
+        )
+        raise
     created = sum(1 for item in batch if item.external_key not in existing)
     updated = len(batch) - created
+    logger.debug(
+        "Catalog upsert batch ok created=%s updated=%s size=%s",
+        created,
+        updated,
+        len(batch),
+        extra=log_extra(
+            component="catalog.sync",
+            region=region or (batch[0].region if batch else ""),
+            batch_size=len(batch),
+            created=created,
+            updated=updated,
+        ),
+    )
     return created, updated
 
 
@@ -277,6 +405,18 @@ def sync_regions(
 ) -> CatalogSyncRun:
     run = CatalogSyncRun.objects.create(regions=regions)
     totals = RegionSyncResult(region="all")
+
+    logger.info(
+        "Catalog sync run started regions=%s sync_run_id=%s",
+        ",".join(regions),
+        run.id,
+        extra=log_extra(
+            component="catalog.sync",
+            sync_run_id=str(run.id),
+            regions=",".join(regions),
+            region_count=len(regions),
+        ),
+    )
 
     for region in regions:
         result = sync_region(
@@ -299,6 +439,28 @@ def sync_regions(
     run.finished_at = timezone.now()
     run.notes = f"Completed at {datetime.now().isoformat(timespec='seconds')}"
     run.save()
+
+    logger.info(
+        "Catalog sync run finished sync_run_id=%s created=%s updated=%s "
+        "skipped=%s deactivated=%s truncated=%s errors=%s",
+        run.id,
+        run.created_count,
+        run.updated_count,
+        run.skipped_count,
+        run.deactivated_count,
+        totals.truncated,
+        run.error_count,
+        extra=log_extra(
+            component="catalog.sync",
+            sync_run_id=str(run.id),
+            created=run.created_count,
+            updated=run.updated_count,
+            skipped=run.skipped_count,
+            deactivated=run.deactivated_count,
+            truncated=totals.truncated,
+            errors=run.error_count,
+        ),
+    )
 
     from catalog.cache import invalidate_catalog_caches
 

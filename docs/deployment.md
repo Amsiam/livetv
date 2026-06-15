@@ -706,10 +706,53 @@ Run after every deploy:
 
 ### Useful logs
 
+All services log to **stdout** with a consistent format:
+
+```text
+2026-06-15 12:00:00 INFO [catalog.sync] Catalog sync region finished ... | component='catalog.sync' region='Bangladesh' created=120
+```
+
+Tune verbosity in `deploy/.env`:
+
+| Variable | Default (prod) | Purpose |
+|----------|----------------|---------|
+| `LOG_LEVEL` | `INFO` | Root logger |
+| `APP_LOG_LEVEL` | `INFO` | `catalog`, `health`, `matches`, `api`, `releases` |
+| `CELERY_LOG_LEVEL` | `INFO` | Celery worker + beat |
+| `DJANGO_LOG_LEVEL` | `INFO` | Django framework |
+| `SQL_LOG_LEVEL` | `WARNING` | SQL queries (`DEBUG` to trace slow queries) |
+
 ```bash
 cd /opt/live-tv/deploy
 ./scripts/compose.sh -f docker-compose.prod.yml logs -f web
+./scripts/compose.sh -f docker-compose.prod.yml logs -f celery-worker
+./scripts/compose.sh -f docker-compose.prod.yml logs -f celery-beat
 ./scripts/compose.sh -f docker-compose.prod.yml logs -f nginx
+```
+
+**Catalog sync** (Celery or manual `sync_livetv_collector`):
+
+```bash
+# Full sync run lifecycle
+./scripts/compose.sh -f docker-compose.prod.yml logs celery-worker 2>&1 | grep catalog.sync
+
+# Upsert / DB errors (field length, etc.)
+./scripts/compose.sh -f docker-compose.prod.yml logs celery-worker 2>&1 | grep -E 'upsert batch failed|Catalog sync chunk failed|Task failed'
+
+# Per-region summary
+./scripts/compose.sh -f docker-compose.prod.yml logs celery-worker 2>&1 | grep 'region finished'
+```
+
+**Stream health probes:**
+
+```bash
+./scripts/compose.sh -f docker-compose.prod.yml logs celery-worker 2>&1 | grep 'Stream probe'
+```
+
+After changing log levels, restart app containers:
+
+```bash
+FORCE_BUILD=1 ./scripts/roll-app-tier.sh
 ```
 
 ---

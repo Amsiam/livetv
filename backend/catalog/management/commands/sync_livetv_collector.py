@@ -61,6 +61,6 @@ class Command(BaseCommand):
             self.style.SUCCESS(
                 f"Done — created {run.created_count}, updated {run.updated_count}, "
                 f"skipped {run.skipped_count}, deactivated {run.deactivated_count}, "
-                f"errors {run.error_count}"
+                f"errors {run.error_count} (sync_run_id={run.id})"
             )
         )

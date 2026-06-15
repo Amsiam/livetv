@@ -8,6 +8,8 @@ from django.db.models import F
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
+from config.log_extra import log_extra
+
 logger = logging.getLogger(__name__)
 
 
@@ -55,7 +57,27 @@ def _record_region_sync_result(sync_run_id: str, region: str, result: dict) -> N
 
     if finished:
         invalidate_catalog_caches()
-        logger.info("Catalog sync run %s finished", sync_run_id)
+        run = CatalogSyncRun.objects.get(pk=sync_run_id)
+        logger.info(
+            "Catalog sync run finished sync_run_id=%s created=%s updated=%s "
+            "skipped=%s deactivated=%s errors=%s regions=%s",
+            sync_run_id,
+            run.created_count,
+            run.updated_count,
+            run.skipped_count,
+            run.deactivated_count,
+            run.error_count,
+            ",".join(run.regions),
+            extra=log_extra(
+                component="health.sync",
+                sync_run_id=sync_run_id,
+                created=run.created_count,
+                updated=run.updated_count,
+                skipped=run.skipped_count,
+                deactivated=run.deactivated_count,
+                errors=run.error_count,
+            ),
+        )
 
 
 @shared_task(name="health.sync_tv_catalog")
@@ -74,7 +96,17 @@ def sync_tv_catalog_task() -> dict:
         "regions": regions,
         "status": "dispatched",
     }
-    logger.info("Catalog sync dispatched: %s", result)
+    logger.info(
+        "Catalog sync dispatched sync_run_id=%s regions=%s",
+        run.id,
+        ",".join(regions),
+        extra=log_extra(
+            component="health.sync",
+            sync_run_id=str(run.id),
+            regions=",".join(regions),
+            region_count=len(regions),
+        ),
+    )
     return result
 
 
@@ -92,7 +124,14 @@ def sync_region_coordinator_task(sync_run_id: str, region: str) -> dict:
     try:
         payload = fetch_region_payload(region)
     except requests.RequestException:
-        logger.exception("Failed to fetch region %s", region)
+        logger.exception(
+            "Failed to fetch region payload",
+            extra=log_extra(
+                component="health.sync",
+                sync_run_id=sync_run_id,
+                region=region,
+            ),
+        )
         _record_region_sync_result(
             sync_run_id,
             region,
@@ -103,6 +142,19 @@ def sync_region_coordinator_task(sync_run_id: str, region: str) -> dict:
     entries = list(iter_catalog_entries(payload, region))
     chunk_size = settings.CATALOG_SYNC_CHUNK_SIZE
     chunks = chunk_list(entries, chunk_size)
+
+    logger.info(
+        "Catalog sync region dispatched entries=%s chunks=%s",
+        len(entries),
+        len(chunks),
+        extra=log_extra(
+            component="health.sync",
+            sync_run_id=sync_run_id,
+            region=region,
+            entry_count=len(entries),
+            chunk_count=len(chunks),
+        ),
+    )
 
     if not chunks:
         finalize_region_sync_task.apply_async(
@@ -134,7 +186,22 @@ def sync_region_entries_chunk_task(
     from catalog.sync import upsert_catalog_entries
 
     sync_started = _parse_sync_started(sync_started_iso)
-    created, updated = upsert_catalog_entries(entries, sync_started)
+    try:
+        created, updated = upsert_catalog_entries(
+            entries,
+            sync_started,
+            region=region,
+        )
+    except Exception:
+        logger.exception(
+            "Catalog sync chunk failed",
+            extra=log_extra(
+                component="health.sync",
+                region=region,
+                chunk_size=len(entries),
+            ),
+        )
+        raise
     return {
         "region": region,
         "created": created,
@@ -169,7 +236,20 @@ def finalize_region_sync_task(
         "deactivated": deactivated,
     }
     _record_region_sync_result(sync_run_id, region, result)
-    logger.info("Region sync finalized: %s", result)
+    logger.info(
+        "Catalog sync region finalized created=%s updated=%s deactivated=%s",
+        created,
+        updated,
+        deactivated,
+        extra=log_extra(
+            component="health.sync",
+            sync_run_id=sync_run_id,
+            region=region,
+            created=created,
+            updated=updated,
+            deactivated=deactivated,
+        ),
+    )
     return result
 
 

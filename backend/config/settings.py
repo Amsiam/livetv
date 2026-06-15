@@ -212,6 +212,14 @@ CELERY_TASK_TRACK_STARTED = True
 
 from celery.schedules import crontab  # noqa: E402
 
+from config.logging import build_logging_config  # noqa: E402
+
+LOGGING = build_logging_config(debug=DEBUG)
+
+CELERY_WORKER_HIJACK_ROOT_LOGGER = False
+CELERY_WORKER_REDIRECT_STDOUTS = True
+CELERY_WORKER_REDIRECT_STDOUTS_LEVEL = os.environ.get("CELERY_LOG_LEVEL", "INFO").upper()
+
 CELERY_BEAT_SCHEDULE = {
     "sync-tv-catalog": {
         "task": "health.sync_tv_catalog",
