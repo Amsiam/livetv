@@ -1,3 +1,5 @@
+import json
+
 from django.contrib import admin
 from django.contrib.admin.views.autocomplete import AutocompleteJsonView
 from django.http import JsonResponse
@@ -260,6 +262,7 @@ class CatalogSyncRunAdmin(admin.ModelAdmin):
     list_display = (
         "started_at",
         "finished_at",
+        "region_progress",
         "created_count",
         "updated_count",
         "skipped_count",
@@ -277,3 +280,19 @@ class CatalogSyncRunAdmin(admin.ModelAdmin):
         "error_count",
         "notes",
     )
+
+    @admin.display(description="Regions")
+    def region_progress(self, obj: CatalogSyncRun) -> str:
+        total = len(obj.regions or [])
+        try:
+            notes = json.loads(obj.notes or "{}")
+        except json.JSONDecodeError:
+            notes = {}
+        completed = len(notes.get("completed_regions") or [])
+        if not total:
+            return "—"
+        if obj.finished_at:
+            return f"{completed}/{total} done"
+        if completed:
+            return f"{completed}/{total} in progress"
+        return f"0/{total} pending"

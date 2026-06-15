@@ -192,6 +192,24 @@ class CeleryTaskTests(TestCase):
         run = CatalogSyncRun.objects.get(pk=result["sync_run_id"])
         self.assertIsNotNone(run.finished_at)
 
+    @override_settings(
+        CELERY_TASK_ALWAYS_EAGER=True,
+        LIVETV_COLLECTOR_REGIONS="Bangladesh",
+    )
+    @patch("catalog.sync.fetch_region_payload", return_value=SAMPLE_PAYLOAD)
+    def test_sync_tv_catalog_skips_when_lock_held(self, _mock_fetch):
+        from django.core.cache import cache
+
+        from catalog.models import CatalogSyncRun
+        from health.tasks import SYNC_CATALOG_LOCK_KEY, sync_tv_catalog_task
+
+        cache.add(SYNC_CATALOG_LOCK_KEY, "1", timeout=60)
+        before = CatalogSyncRun.objects.count()
+        result = sync_tv_catalog_task()
+        self.assertEqual(result["status"], "skipped")
+        self.assertEqual(CatalogSyncRun.objects.count(), before)
+        cache.delete(SYNC_CATALOG_LOCK_KEY)
+
     @override_settings(CELERY_TASK_ALWAYS_EAGER=True, STREAM_PROBE_WORKERS=4)
     @patch("health.stream_health.probe_stream_url")
     def test_probe_tv_channels_parallel(self, mock_probe):

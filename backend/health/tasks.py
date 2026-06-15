@@ -12,6 +12,15 @@ from config.log_extra import log_extra
 
 logger = logging.getLogger(__name__)
 
+SYNC_CATALOG_LOCK_KEY = "health:sync_tv_catalog:running"
+SYNC_CATALOG_LOCK_TTL = 60 * 60 * 4  # safety release if workers die mid-sync
+
+
+def _release_sync_catalog_lock() -> None:
+    from django.core.cache import cache
+
+    cache.delete(SYNC_CATALOG_LOCK_KEY)
+
 
 def _parse_sync_started(sync_started_iso: str):
     parsed = parse_datetime(sync_started_iso)
@@ -56,6 +65,7 @@ def _record_region_sync_result(sync_run_id: str, region: str, result: dict) -> N
         run.save(update_fields=["notes", "finished_at"])
 
     if finished:
+        _release_sync_catalog_lock()
         invalidate_catalog_caches()
         run = CatalogSyncRun.objects.get(pk=sync_run_id)
         logger.info(
@@ -83,13 +93,37 @@ def _record_region_sync_result(sync_run_id: str, region: str, result: dict) -> N
 @shared_task(name="health.sync_tv_catalog")
 def sync_tv_catalog_task() -> dict:
     """Dispatch per-region catalog sync coordinators."""
+    from django.core.cache import cache
+
     from catalog.models import CatalogSyncRun
     from catalog.sync import resolve_regions
 
+    if not cache.add(SYNC_CATALOG_LOCK_KEY, "1", timeout=SYNC_CATALOG_LOCK_TTL):
+        logger.warning(
+            "Catalog sync skipped — another sync is already running",
+            extra=log_extra(component="health.sync", reason="sync_in_progress"),
+        )
+        return {"status": "skipped", "reason": "sync_in_progress"}
+
     regions = resolve_regions()
     run = CatalogSyncRun.objects.create(regions=regions)
-    for region in regions:
-        sync_region_coordinator_task.delay(str(run.id), region)
+    try:
+        for region in regions:
+            sync_region_coordinator_task.delay(str(run.id), region)
+    except Exception:
+        _release_sync_catalog_lock()
+        logger.exception(
+            "Catalog sync dispatch failed",
+            extra=log_extra(
+                component="health.sync",
+                sync_run_id=str(run.id),
+            ),
+        )
+        run.error_count = 1
+        run.finished_at = timezone.now()
+        run.notes = json.dumps({"error": "dispatch_failed"})
+        run.save(update_fields=["error_count", "finished_at", "notes"])
+        raise
 
     result = {
         "sync_run_id": str(run.id),
@@ -163,7 +197,7 @@ def sync_region_coordinator_task(sync_run_id: str, region: str) -> dict:
         return {"region": region, "chunks": 0, "entries": 0, "status": "dispatched"}
 
     header = [
-        sync_region_entries_chunk_task.s(region, chunk, sync_started_iso)
+        sync_region_entries_chunk_task.s(region, chunk, sync_started_iso, sync_run_id)
         for chunk in chunks
     ]
     callback = finalize_region_sync_task.s(sync_run_id, region, sync_started_iso)
@@ -182,6 +216,7 @@ def sync_region_entries_chunk_task(
     region: str,
     entries: list[dict],
     sync_started_iso: str,
+    sync_run_id: str,
 ) -> dict:
     from catalog.sync import upsert_catalog_entries
 
@@ -197,10 +232,14 @@ def sync_region_entries_chunk_task(
             "Catalog sync chunk failed",
             extra=log_extra(
                 component="health.sync",
+                sync_run_id=sync_run_id,
                 region=region,
                 chunk_size=len(entries),
             ),
         )
+        # Chord callback will not run after a header failure — mark region so the
+        # sync run can still reach finished_at instead of staying at 0 forever.
+        _record_region_sync_result(sync_run_id, region, {"errors": 1})
         raise
     return {
         "region": region,
