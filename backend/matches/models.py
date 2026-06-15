@@ -7,6 +7,7 @@ from django.db import models
 from django.utils import timezone
 
 from catalog.deactivation import DeactivationReason
+from catalog.field_limits import CATALOG_NAME_MAX_LENGTH
 
 
 class MatchStatus(models.TextChoices):
@@ -115,10 +116,10 @@ class Channel(models.Model):
         related_name="match_channels",
         help_text="Optional — pick from synced catalog or leave empty for a manual stream.",
     )
-    name = models.CharField(max_length=128, blank=True)
+    name = models.CharField(max_length=CATALOG_NAME_MAX_LENGTH, blank=True)
     language = models.CharField(max_length=32, blank=True)
-    logo_url = models.URLField(blank=True)
-    stream_url = models.URLField(
+    logo_url = models.TextField(blank=True)
+    stream_url = models.TextField(
         blank=True,
         help_text="HLS/m3u8 URL. Filled from catalog when selected, or enter your own.",
     )

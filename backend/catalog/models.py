@@ -6,6 +6,12 @@ from django.db import models
 from django.utils import timezone
 
 from catalog.deactivation import DeactivationReason
+from catalog.field_limits import (
+    CATALOG_CATEGORY_MAX_LENGTH,
+    CATALOG_NAME_MAX_LENGTH,
+    CATALOG_REGION_MAX_LENGTH,
+    CATALOG_SOURCE_DATE_MAX_LENGTH,
+)
 
 
 def make_external_key(region: str, name: str, stream_url: str) -> str:
@@ -22,13 +28,15 @@ class CatalogChannel(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     external_key = models.CharField(max_length=64, unique=True, db_index=True)
     group_key = models.CharField(max_length=64, db_index=True, default="")
-    region = models.CharField(max_length=64, db_index=True)
-    category = models.CharField(max_length=128, blank=True, db_index=True)
-    name = models.CharField(max_length=255, db_index=True)
-    logo_url = models.URLField(blank=True, max_length=500)
-    stream_url = models.URLField(max_length=1000)
-    source_url = models.URLField(blank=True, max_length=1000)
-    source_date = models.CharField(max_length=32, blank=True)
+    region = models.CharField(max_length=CATALOG_REGION_MAX_LENGTH, db_index=True)
+    category = models.CharField(
+        max_length=CATALOG_CATEGORY_MAX_LENGTH, blank=True, db_index=True
+    )
+    name = models.CharField(max_length=CATALOG_NAME_MAX_LENGTH, db_index=True)
+    logo_url = models.TextField(blank=True)
+    stream_url = models.TextField()
+    source_url = models.TextField(blank=True)
+    source_date = models.CharField(max_length=CATALOG_SOURCE_DATE_MAX_LENGTH, blank=True)
     is_active = models.BooleanField(default=True, db_index=True)
     view_count = models.PositiveIntegerField(default=0, db_index=True)
     failure_count = models.PositiveIntegerField(default=0)

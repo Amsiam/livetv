@@ -7,6 +7,7 @@ from django.test import RequestFactory, TestCase
 from catalog.admin import CatalogChannelAdmin
 from catalog.deactivation import DeactivationReason
 from catalog.models import CatalogChannel, make_external_key, make_group_key
+from catalog.normalize import fit_catalog_entry
 from catalog.probe import filter_reachable_entries
 from catalog.stream_urls import is_hls_stream_url
 from catalog.sync import deactivate_non_hls_channels, iter_catalog_entries, sync_region
@@ -52,6 +53,90 @@ class CatalogSyncTests(TestCase):
         entries = list(iter_catalog_entries(SAMPLE_PAYLOAD, "Bangladesh"))
         self.assertEqual(len(entries), 2)
         self.assertEqual(entries[0]["name"], "Test Sports HD")
+
+    def test_iter_catalog_entries_truncates_display_text_not_urls(self):
+        long_name = "N" * 600
+        long_url = "https://example.com/" + ("a" * 2100) + ".m3u8"
+        long_logo = "https://example.com/" + ("l" * 1100) + ".png"
+        payload = {
+            "date": "2026-06-09",
+            "channels": {
+                "Sports": [
+                    {
+                        "name": long_name,
+                        "url": long_url,
+                        "group": "G" * 300,
+                        "logo": long_logo,
+                    }
+                ]
+            },
+        }
+        entries = list(iter_catalog_entries(payload, "Bangladesh"))
+        self.assertEqual(len(entries), 1)
+        entry = entries[0]
+        self.assertEqual(len(entry["name"]), 512)
+        self.assertEqual(len(entry["category"]), 255)
+        self.assertEqual(entry["stream_url"], long_url)
+        self.assertEqual(entry["logo_url"], long_logo)
+        self.assertIn("_truncated_fields", entry)
+        self.assertNotIn("stream_url", entry["_truncated_fields"])
+        self.assertNotIn("logo_url", entry["_truncated_fields"])
+
+    def test_fit_catalog_entry_preserves_external_key_inputs(self):
+        long_name = "A" * 600
+        stream_url = "https://example.com/live.m3u8"
+        entry, truncated = fit_catalog_entry(
+            {
+                "external_key": make_external_key("Bangladesh", long_name, stream_url),
+                "group_key": make_group_key(long_name),
+                "region": "Bangladesh",
+                "category": "Sports",
+                "name": long_name,
+                "logo_url": "",
+                "stream_url": stream_url,
+                "source_url": "",
+                "source_date": "2026-06-09",
+            }
+        )
+        self.assertEqual(truncated, ["name"])
+        self.assertEqual(len(entry["name"]), 512)
+        self.assertEqual(
+            entry["external_key"],
+            make_external_key("Bangladesh", long_name, stream_url),
+        )
+
+    @patch("catalog.sync.fetch_region_payload")
+    def test_sync_region_truncates_long_name(self, mock_fetch):
+        long_name = "Channel " + ("X" * 600)
+        mock_fetch.return_value = {
+            "date": "2026-06-09",
+            "channels": {
+                "Sports": [
+                    {"name": long_name, "url": "https://example.com/live.m3u8"},
+                ]
+            },
+        }
+        result = sync_region("Bangladesh", verify_streams=False)
+        self.assertEqual(result.created, 1)
+        self.assertEqual(result.truncated, 1)
+        channel = CatalogChannel.objects.get()
+        self.assertEqual(len(channel.name), 512)
+
+    @patch("catalog.sync.fetch_region_payload")
+    def test_sync_region_preserves_long_stream_url(self, mock_fetch):
+        long_url = "https://example.com/" + ("x" * 3000) + "/live.m3u8"
+        mock_fetch.return_value = {
+            "date": "2026-06-09",
+            "channels": {
+                "Sports": [
+                    {"name": "Long URL Channel", "url": long_url},
+                ]
+            },
+        }
+        result = sync_region("Bangladesh", verify_streams=False)
+        self.assertEqual(result.created, 1)
+        channel = CatalogChannel.objects.get()
+        self.assertEqual(channel.stream_url, long_url)
 
     def test_is_hls_stream_url(self):
         self.assertTrue(is_hls_stream_url("https://cdn.example.com/live/playlist.m3u8"))

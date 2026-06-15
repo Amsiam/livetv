@@ -13,6 +13,7 @@ from catalog.models import (
     make_external_key,
     make_group_key,
 )
+from catalog.normalize import fit_catalog_entry
 from catalog.probe import filter_reachable_entries
 from catalog.stream_urls import is_hls_stream_url
 
@@ -28,6 +29,7 @@ class RegionSyncResult:
     updated: int = 0
     deactivated: int = 0
     skipped: int = 0
+    truncated: int = 0
     errors: int = 0
     source_date: str = ""
 
@@ -67,17 +69,28 @@ def iter_catalog_entries(payload: dict, region: str):
             if not is_hls_stream_url(stream_url):
                 continue
             category = (item.get("group") or group_name or "").strip()
-            yield {
-                "external_key": make_external_key(region, name, stream_url),
-                "group_key": make_group_key(name),
-                "region": region,
-                "category": category,
-                "name": name,
-                "logo_url": (item.get("logo") or "").strip(),
-                "stream_url": stream_url,
-                "source_url": (item.get("source") or "").strip(),
-                "source_date": source_date,
-            }
+            entry, truncated_fields = fit_catalog_entry(
+                {
+                    "external_key": make_external_key(region, name, stream_url),
+                    "group_key": make_group_key(name),
+                    "region": region,
+                    "category": category,
+                    "name": name,
+                    "logo_url": (item.get("logo") or "").strip(),
+                    "stream_url": stream_url,
+                    "source_url": (item.get("source") or "").strip(),
+                    "source_date": source_date,
+                }
+            )
+            if truncated_fields:
+                logger.warning(
+                    "Truncated catalog fields %s for %r in %s",
+                    ", ".join(truncated_fields),
+                    name[:80],
+                    region,
+                )
+                entry["_truncated_fields"] = truncated_fields
+            yield entry
 
 
 def upsert_catalog_entries(
@@ -91,6 +104,7 @@ def upsert_catalog_entries(
     chunk_size = getattr(settings, "CATALOG_SYNC_CHUNK_SIZE", BATCH_SIZE)
 
     for entry in entries:
+        entry.pop("_truncated_fields", None)
         batch.append(
             CatalogChannel(
                 external_key=entry["external_key"],
@@ -182,6 +196,9 @@ def sync_region(
 
     result.source_date = str(payload.get("date", ""))
     entries = list(iter_catalog_entries(payload, region))
+    result.truncated = sum(1 for entry in entries if entry.get("_truncated_fields"))
+    for entry in entries:
+        entry.pop("_truncated_fields", None)
 
     if verify_streams and entries:
         entries, skipped = filter_reachable_entries(entries)
@@ -271,6 +288,7 @@ def sync_regions(
         totals.updated += result.updated
         totals.deactivated += result.deactivated
         totals.skipped += result.skipped
+        totals.truncated += result.truncated
         totals.errors += result.errors
 
     run.created_count = totals.created
