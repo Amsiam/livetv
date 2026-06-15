@@ -35,6 +35,7 @@ class GroupedCatalogAutocompleteJsonView(AutocompleteJsonView):
 class CatalogChannelAdminBase(admin.ModelAdmin):
     search_fields = ("name", "stream_url", "category", "region")
     list_per_page = 50
+    show_full_result_count = False
     readonly_fields = (
         "external_key",
         "logo_preview_large",
@@ -175,7 +176,22 @@ class CatalogChannelAdmin(DeadLinkAdminActionsMixin, CatalogChannelAdminBase):
     )
 
     def get_queryset(self, request):
-        return super().get_queryset(request).filter(is_active=True)
+        return (
+            super()
+            .get_queryset(request)
+            .filter(is_active=True)
+            .only(
+                "id",
+                "name",
+                "region",
+                "category",
+                "logo_url",
+                "stream_url",
+                "failure_count",
+                "last_seen_at",
+                "group_key",
+            )
+        )
 
     def has_add_permission(self, request):
         return False
@@ -246,7 +262,24 @@ class InactiveCatalogChannelAdmin(CatalogChannelAdminBase):
     )
 
     def get_queryset(self, request):
-        return CatalogChannel.objects.filter(is_active=False)
+        return CatalogChannel.objects.filter(is_active=False).only(
+            "id",
+            "name",
+            "region",
+            "category",
+            "logo_url",
+            "stream_url",
+            "failure_count",
+            "deactivation_reason",
+            "deactivated_at",
+            "group_key",
+            "external_key",
+            "source_url",
+            "source_date",
+            "last_seen_at",
+            "created_at",
+            "updated_at",
+        )
 
     def get_search_results(self, request, queryset, search_term):
         # Base class forces is_active=True (for autocomplete on active channels).

@@ -2,7 +2,7 @@ from collections import defaultdict
 from urllib.parse import urlparse
 
 from django.db import connection
-from django.db.models import Case, F, IntegerField, QuerySet, When, Window
+from django.db.models import Case, F, IntegerField, QuerySet, Sum, When, Window
 from django.db.models.functions import RowNumber
 
 from catalog.models import CatalogChannel
@@ -130,24 +130,31 @@ def order_channels_by_popularity(
 
 
 def primary_channels_queryset(queryset: QuerySet[CatalogChannel]) -> QuerySet[CatalogChannel]:
-    """One primary row per group_key (lowest failure_count, newest updated_at)."""
+    """One primary row per group_key, ordered by total group views (SQL — paginate-friendly)."""
     if connection.vendor == "postgresql":
-        primaries = queryset.annotate(
-            row_num=Window(
-                expression=RowNumber(),
-                partition_by=[F("group_key")],
-                order_by=[F("failure_count").asc(), F("updated_at").desc()],
+        return (
+            queryset.annotate(
+                group_view_total=Window(
+                    expression=Sum("view_count"),
+                    partition_by=[F("group_key")],
+                ),
+                row_num=Window(
+                    expression=RowNumber(),
+                    partition_by=[F("group_key")],
+                    order_by=[F("failure_count").asc(), F("updated_at").desc()],
+                ),
             )
-        ).filter(row_num=1)
-    else:
-        ordered = list(queryset.order_by("group_key", "failure_count", "-updated_at"))
-        seen: set[str] = set()
-        primary_ids: list = []
-        for channel in ordered:
-            if channel.group_key in seen:
-                continue
-            seen.add(channel.group_key)
-            primary_ids.append(channel.id)
-        primaries = queryset.model.objects.filter(id__in=primary_ids)
+            .filter(row_num=1)
+            .order_by("-group_view_total", "region", "category", "name")
+        )
 
+    ordered = list(queryset.order_by("group_key", "failure_count", "-updated_at"))
+    seen: set[str] = set()
+    primary_ids: list = []
+    for channel in ordered:
+        if channel.group_key in seen:
+            continue
+        seen.add(channel.group_key)
+        primary_ids.append(channel.id)
+    primaries = queryset.model.objects.filter(id__in=primary_ids)
     return order_channels_by_popularity(primaries, grouped=True)

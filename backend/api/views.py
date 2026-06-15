@@ -28,7 +28,6 @@ from catalog.cache import (
     CATALOG_REGIONS_KEY,
 )
 from catalog.grouping import (
-    order_channels_by_popularity,
     primary_channels_queryset,
     siblings_by_group_keys,
 )
@@ -335,7 +334,7 @@ class TvChannelViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewset
         if self._grouped_list(request):
             queryset = primary_channels_queryset(queryset)
         else:
-            queryset = order_channels_by_popularity(queryset, grouped=False)
+            queryset = queryset.order_by("-view_count", "region", "category", "name")
 
         page = self.paginate_queryset(queryset)
         if page is not None:
@@ -350,7 +349,7 @@ class TvChannelViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewset
                 data = serializer.data
             response_data = data
 
-        cache.set(cache_key, response_data, settings.MATCH_LIST_CACHE_TTL)
+        cache.set(cache_key, response_data, settings.CATALOG_LIST_CACHE_TTL)
         return public_json_response(response_data)
 
     def retrieve(self, request, *args, **kwargs):
@@ -370,7 +369,7 @@ class TvChannelViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewset
             },
         )
         data = serializer.data
-        cache.set(cache_key, data, settings.MATCH_LIST_CACHE_TTL)
+        cache.set(cache_key, data, settings.CATALOG_LIST_CACHE_TTL)
         return public_json_response(data)
 
     @action(detail=False, methods=["get"], url_path="regions")
@@ -386,5 +385,5 @@ class TvChannelViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewset
             .order_by("region")
         )
         data = TvChannelRegionSerializer(rows, many=True).data
-        cache.set(CATALOG_REGIONS_KEY, data, settings.MATCH_LIST_CACHE_TTL)
+        cache.set(CATALOG_REGIONS_KEY, data, settings.CATALOG_LIST_CACHE_TTL)
         return public_json_response(data)
