@@ -248,6 +248,30 @@ class InactiveCatalogChannelAdmin(CatalogChannelAdminBase):
     def get_queryset(self, request):
         return CatalogChannel.objects.filter(is_active=False)
 
+    def get_search_results(self, request, queryset, search_term):
+        # Base class forces is_active=True (for autocomplete on active channels).
+        return admin.ModelAdmin.get_search_results(self, request, queryset, search_term)
+
+    def changelist_view(self, request, extra_context=None):
+        from django.conf import settings
+
+        extra_context = {
+            **(extra_context or {}),
+            "inactive_channel_count": CatalogChannel.objects.filter(
+                is_active=False
+            ).count(),
+            "active_channel_count": CatalogChannel.objects.filter(
+                is_active=True
+            ).count(),
+            "channel_failure_threshold": getattr(
+                settings, "CHANNEL_FAILURE_THRESHOLD", 100
+            ),
+            "channel_health_failure_threshold": getattr(
+                settings, "CHANNEL_HEALTH_FAILURE_THRESHOLD", 3
+            ),
+        }
+        return super().changelist_view(request, extra_context)
+
     def has_add_permission(self, request):
         return False
 

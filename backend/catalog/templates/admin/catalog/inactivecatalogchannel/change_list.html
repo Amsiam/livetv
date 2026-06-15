@@ -1,0 +1,17 @@
+{% extends "admin/change_list.html" %}
+
+{% block content_title %}
+  <h1>Inactive TV channels (review)</h1>
+  <p style="margin: 0.5rem 0 1rem; color: #666;">
+    {{ inactive_channel_count }} inactive · {{ active_channel_count }} active in catalog.
+    This list only shows channels with <strong>is_active = no</strong> (hidden from the app).
+  </p>
+  {% if inactive_channel_count == 0 %}
+    <p style="margin: 0 0 1rem; padding: 0.75rem 1rem; background: #fff8e6; border: 1px solid #f0d78c; border-radius: 4px;">
+      Nothing here yet. Channels appear after deactivation: admin “Mark as dead link”,
+      {{ channel_failure_threshold }} app playback failures,
+      {{ channel_health_failure_threshold }} Celery health probe failures,
+      or removed from the upstream catalog sync.
+    </p>
+  {% endif %}
+{% endblock %}
